@@ -1,36 +1,77 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Live Quiz
 
-## Getting Started
+Aplikacja typu "live quiz" (na wzór Kahoot). Host tworzy quiz na podstawie promptu (pytania generuje AI), gracze dołączają telefonami przez kod pokoju / QR i odpowiadają na czas.
 
-First, run the development server:
+Stack: Next.js (App Router, TypeScript) + Tailwind CSS + Supabase (Postgres + Realtime) + Anthropic API (`claude-haiku-4-5`) do generowania pytań, wdrażane na Vercel.
+
+## 1. Zmienne środowiskowe
+
+Skopiuj `.env.local.example` do `.env.local` i uzupełnij:
+
+| Zmienna | Skąd wziąć |
+| --- | --- |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase Dashboard → Twój projekt → **Project Settings → API** → `Project URL` |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase Dashboard → **Project Settings → API** → `anon public` key |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase Dashboard → **Project Settings → API** → `service_role` key (⚠️ tajny, tylko po stronie serwera, nigdy nie commituj) |
+| `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com) → **API Keys** → Create Key |
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cp .env.local.example .env.local
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## 2. Migracja SQL w Supabase
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. Utwórz nowy projekt na [supabase.com](https://supabase.com).
+2. Otwórz **SQL Editor** w panelu Supabase.
+3. Wklej całą zawartość pliku [`supabase/migrations/0001_init.sql`](supabase/migrations/0001_init.sql) i uruchom (**Run**).
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+   Alternatywnie, jeśli używasz Supabase CLI lokalnie:
 
-## Learn More
+   ```bash
+   supabase link --project-ref <twoj-project-ref>
+   supabase db push
+   ```
 
-To learn more about Next.js, take a look at the following resources:
+4. Sprawdź w **Database → Replication**, że tabele `rooms`, `players`, `answers` są dodane do publikacji `supabase_realtime` (migracja robi to automatycznie).
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 3. Uruchomienie lokalne
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+npm install
+npm run dev
+```
 
-## Deploy on Vercel
+Aplikacja wystartuje na [http://localhost:3000](http://localhost:3000).
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- Otwórz `/` na komputerze/rzutniku, aby stworzyć quiz (rola hosta).
+- Zeskanuj wygenerowany kod QR telefonem albo wejdź na `/play/<KOD>`, aby dołączyć jako gracz.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## 4. Wypchnięcie na GitHub i wdrożenie na Vercel
+
+1. Zainicjuj repozytorium i wypchnij kod:
+
+   ```bash
+   git init
+   git add .
+   git commit -m "Initial commit"
+   git branch -M main
+   git remote add origin https://github.com/<twoj-user>/<twoje-repo>.git
+   git push -u origin main
+   ```
+
+2. Wejdź na [vercel.com/new](https://vercel.com/new) i zaimportuj repozytorium z GitHuba.
+3. W ustawieniach projektu (**Settings → Environment Variables**) dodaj te same zmienne co w `.env.local`:
+   - `NEXT_PUBLIC_SUPABASE_URL`
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - `SUPABASE_SERVICE_ROLE_KEY`
+   - `ANTHROPIC_API_KEY`
+4. Kliknij **Deploy**.
+5. Po wdrożeniu host tworzy quiz na `https://<twoja-domena>.vercel.app`, a wygenerowany kod QR będzie prowadził graczy na `https://<twoja-domena>.vercel.app/play/<KOD>`.
+
+## Jak to działa
+
+- `app/api/generate-quiz/route.ts` — jedyne miejsce, gdzie wywoływane jest Anthropic API (po stronie serwera, kluczem `ANTHROPIC_API_KEY`, który nigdy nie trafia do przeglądarki). Generuje pytania, zapisuje `quiz` + `questions` i tworzy `room` przy pomocy klucza `SUPABASE_SERVICE_ROLE_KEY` (omija RLS).
+- `app/api/rooms/[roomCode]/{start,next,end-round}/route.ts` — sterowanie przebiegiem gry (start, koniec rundy + naliczanie punktów, przejście dalej) po stronie serwera, również kluczem service role.
+- `app/api/rooms/[roomCode]/question/route.ts` — host i gracz pobierają aktualne pytanie przez tę trasę (tabela `questions` nie ma publicznej polityki RLS); poprawna odpowiedź (`correct_index`) jest dołączana dopiero po zakończeniu rundy (`?reveal=1`), żeby nie wyciekała do gracza w trakcie odliczania.
+- Dołączanie do pokoju (`players`) i wysyłanie odpowiedzi (`answers`) idzie bezpośrednio z przeglądarki kluczem `anon`, zgodnie z politykami RLS z migracji.
+- Synchronizacja w czasie rzeczywistym (lobby, start gry, kolejne pytania, wyniki) działa przez Supabase Realtime (Postgres Changes) na tabelach `rooms`, `players`, `answers` — stan gry trzymany jest w wierszu `rooms`, więc działa też po odświeżeniu strony.

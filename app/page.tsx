@@ -1,65 +1,136 @@
-import Image from "next/image";
+"use client";
+
+import { useState, FormEvent } from "react";
+import { useRouter } from "next/navigation";
+import { card, gradientText, primaryButton, inputBase } from "@/lib/theme";
+
+const ROUND_OPTIONS = [5, 10, 15] as const;
 
 export default function Home() {
+  const router = useRouter();
+
+  const [prompt, setPrompt] = useState("");
+  const [rounds, setRounds] = useState<(typeof ROUND_OPTIONS)[number]>(10);
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+
+  const [joinCode, setJoinCode] = useState("");
+  const [joinError, setJoinError] = useState<string | null>(null);
+
+  async function handleCreate(e: FormEvent) {
+    e.preventDefault();
+    if (!prompt.trim() || creating) return;
+
+    setCreating(true);
+    setCreateError(null);
+
+    try {
+      const res = await fetch("/api/generate-quiz", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: prompt.trim(), rounds }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setCreateError(data.error ?? "Coś nie wyszło, spróbuj jeszcze raz 😅");
+        setCreating(false);
+        return;
+      }
+
+      router.push(`/host/${data.roomCode}`);
+    } catch {
+      setCreateError("Ups, sieć się posypała. Spróbuj ponownie.");
+      setCreating(false);
+    }
+  }
+
+  function handleJoin(e: FormEvent) {
+    e.preventDefault();
+    const code = joinCode.trim().toUpperCase();
+    if (!code) {
+      setJoinError("Wpisz kod, bez tego nie wejdziesz 👀");
+      return;
+    }
+    router.push(`/play/${code}`);
+  }
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
+    <div className="flex flex-1 flex-col items-center justify-center px-4 py-16">
+      <div className="w-full max-w-3xl text-center">
+        <span className="inline-block -rotate-2 rounded-full border-2 border-black bg-lime-300 px-4 py-1 text-xs font-black uppercase tracking-widest text-black shadow-[3px_3px_0_0_#000]">
+          Live quiz, ogarnia go AI ⚡
+        </span>
+        <h1 className={`mt-5 text-6xl font-black tracking-tight sm:text-7xl ${gradientText}`}>
+          Live Quiz
+        </h1>
+        <p className="mt-3 text-lg text-white/60">
+          Wrzuć temat, AI ogarnie pytania. Albo wskakuj do gry kumpla kodem 🎉
+        </p>
+      </div>
+
+      <div className="mt-12 grid w-full max-w-3xl gap-6 sm:grid-cols-2">
+        <form onSubmit={handleCreate} className={`flex flex-col gap-4 p-6 ${card}`}>
+          <h2 className="text-xl font-black text-white">Zrób quiza 🎲</h2>
+
+          <label className="flex flex-col gap-2 text-left text-sm font-semibold text-white/70">
+            O czym ma być?
+            <textarea
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              placeholder="np. imprezowe ciekawostki, seriale, memy…"
+              rows={3}
+              className={`resize-none ${inputBase}`}
+              required
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+          </label>
+
+          <label className="flex flex-col gap-2 text-left text-sm font-semibold text-white/70">
+            Ile pytań?
+            <select
+              value={rounds}
+              onChange={(e) =>
+                setRounds(Number(e.target.value) as (typeof ROUND_OPTIONS)[number])
+              }
+              className={inputBase}
+            >
+              {ROUND_OPTIONS.map((n) => (
+                <option key={n} value={n} className="bg-[#0a0a0c]">
+                  {n}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          {createError && <p className="text-sm font-semibold text-rose-400">{createError}</p>}
+
+          <button type="submit" disabled={creating} className={`mt-2 ${primaryButton}`}>
+            {creating ? "AI kuma temat…" : "Odpalamy! 🚀"}
+          </button>
+        </form>
+
+        <form onSubmit={handleJoin} className={`flex flex-col gap-4 p-6 ${card}`}>
+          <h2 className="text-xl font-black text-white">Wskakuj do gry 🕹️</h2>
+
+          <label className="flex flex-col gap-2 text-left text-sm font-semibold text-white/70">
+            Kod od organizatora
+            <input
+              value={joinCode}
+              onChange={(e) => setJoinCode(e.target.value)}
+              placeholder="np. AB12CD"
+              className={`text-center text-2xl font-black uppercase tracking-widest ${inputBase}`}
+              maxLength={8}
+              required
+            />
+          </label>
+
+          {joinError && <p className="text-sm font-semibold text-rose-400">{joinError}</p>}
+
+          <button type="submit" className={`mt-auto ${primaryButton}`}>
+            Wskakuję!
+          </button>
+        </form>
+      </div>
     </div>
   );
 }
