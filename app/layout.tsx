@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Live Quiz",
-  description: "Kahoot-style live quiz app powered by AI-generated questions",
+  title: "Quizownia",
+  description: "Quiz na żywo napędzany przez AI",
 };
 
 export default function RootLayout({

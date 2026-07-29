@@ -1,4 +1,4 @@
-# Live Quiz
+# Quizownia
 
 Aplikacja typu "live quiz" (na wzór Kahoot). Host tworzy quiz na podstawie promptu (pytania generuje AI), gracze dołączają telefonami przez kod pokoju / QR i odpowiadają na czas.
 
