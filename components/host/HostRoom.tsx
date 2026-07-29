@@ -34,7 +34,14 @@ export default function HostRoom({ roomCode }: { roomCode: string }) {
 
   const [question, setQuestion] = useState<QuestionPayload | null>(null);
   const [totalQuestions, setTotalQuestions] = useState(0);
-  const [answeredPlayerIds, setAnsweredPlayerIds] = useState<Set<string>>(new Set());
+  // Append-only log of every answer INSERT seen over realtime, each tagged
+  // with its question_id. Deliberately never reset per-round: filtering by
+  // the *current* question's id at read time is what makes "has everyone
+  // answered" correct, instead of a Set that gets cleared in one effect
+  // and read (still stale) by another effect in the same render pass.
+  const [answerEvents, setAnswerEvents] = useState<{ player_id: string; question_id: string }[]>(
+    []
+  );
   const [roundAnswers, setRoundAnswers] = useState<AnswerRow[]>([]);
 
   const [starting, setStarting] = useState(false);
@@ -105,8 +112,11 @@ export default function HostRoom({ roomCode }: { roomCode: string }) {
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "answers", filter: `room_id=eq.${room.id}` },
         (payload) => {
-          const row = payload.new as { player_id: string };
-          setAnsweredPlayerIds((prev) => new Set(prev).add(row.player_id));
+          const row = payload.new as { player_id: string; question_id: string };
+          setAnswerEvents((prev) => [
+            ...prev,
+            { player_id: row.player_id, question_id: row.question_id },
+          ]);
         }
       )
       .subscribe();
@@ -125,7 +135,6 @@ export default function HostRoom({ roomCode }: { roomCode: string }) {
     loadedQuestionKeyRef.current = key;
 
     setQuestion(null);
-    setAnsweredPlayerIds(new Set());
     fetch(`/api/rooms/${roomCode}/question?index=${room.current_question_index}`)
       .then((res) => res.json())
       .then((data) => {
@@ -169,6 +178,14 @@ export default function HostRoom({ roomCode }: { roomCode: string }) {
     NEXT_QUESTION_DELAY_SECONDS
   );
 
+  // Filtered by the *current* question's id rather than reset-per-round --
+  // see the answerEvents state comment above for why that matters.
+  const currentQuestionReady = question?.order_index === room?.current_question_index;
+  const answeredCount =
+    currentQuestionReady && question
+      ? answerEvents.filter((e) => e.question_id === question.id).length
+      : 0;
+
   const endRoundOnce = useCallback(() => {
     if (!room) return;
     const key = `${room.status}-${room.current_question_index}`;
@@ -185,10 +202,10 @@ export default function HostRoom({ roomCode }: { roomCode: string }) {
 
   // Auto end the round early once every current player has answered.
   useEffect(() => {
-    if (!room || room.status !== "in_progress") return;
-    if (players.length === 0 || answeredPlayerIds.size < players.length) return;
+    if (!room || room.status !== "in_progress" || !currentQuestionReady) return;
+    if (players.length === 0 || answeredCount < players.length) return;
     endRoundOnce();
-  }, [room, players.length, answeredPlayerIds, endRoundOnce]);
+  }, [room, players.length, answeredCount, currentQuestionReady, endRoundOnce]);
 
   // Auto advance to the next question a few seconds after the round result is shown.
   useEffect(() => {
@@ -224,11 +241,6 @@ export default function HostRoom({ roomCode }: { roomCode: string }) {
   const joinUrl =
     typeof window !== "undefined" ? `${window.location.origin}/play/${roomCode}` : "";
 
-  // Guard against a stale `question` still hanging around from the
-  // previous round while the new one is loading -- otherwise the "X/Y
-  // odpowiedziało" counter can flash wrong numbers for a beat.
-  const currentQuestionReady = question?.order_index === room.current_question_index;
-
   return (
     <div className="flex flex-1 flex-col p-6 text-white">
       {room.status === "lobby" && (
@@ -252,7 +264,7 @@ export default function HostRoom({ roomCode }: { roomCode: string }) {
           totalQuestions={totalQuestions}
           remainingSeconds={remainingSeconds}
           fraction={fraction}
-          answeredCount={answeredPlayerIds.size}
+          answeredCount={answeredCount}
           totalPlayers={players.length}
         />
       )}
