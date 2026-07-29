@@ -134,7 +134,7 @@ export default function PlayRoom({ roomCode }: { roomCode: string }) {
     setSelectedIndex(null);
     setOwnPoints(null);
     setAnswerError(null);
-    fetch(`/api/rooms/${roomCode}/question`)
+    fetch(`/api/rooms/${roomCode}/question?index=${room.current_question_index}`)
       .then((res) => res.json())
       .then((data) => {
         setQuestion(data.question);
@@ -149,7 +149,7 @@ export default function PlayRoom({ roomCode }: { roomCode: string }) {
     if (loadedResultKeyRef.current === key) return;
     loadedResultKeyRef.current = key;
 
-    fetch(`/api/rooms/${roomCode}/question?reveal=1`)
+    fetch(`/api/rooms/${roomCode}/question?reveal=1&index=${room.current_question_index}`)
       .then((res) => res.json())
       .then((data) => {
         setQuestion(data.question);
@@ -289,6 +289,8 @@ export default function PlayRoom({ roomCode }: { roomCode: string }) {
     const isCorrect = selectedIndex !== null && selectedIndex === question.correct_index;
     return (
       <RoundResultView
+        question={question}
+        selectedIndex={selectedIndex}
         isCorrect={isCorrect}
         answered={selectedIndex !== null}
         points={ownPoints ?? 0}
@@ -439,6 +441,8 @@ function AnswerView({
 }
 
 function RoundResultView({
+  question,
+  selectedIndex,
   isCorrect,
   answered,
   points,
@@ -446,6 +450,8 @@ function RoundResultView({
   rank,
   totalPlayers,
 }: {
+  question: QuestionPayload;
+  selectedIndex: number | null;
   isCorrect: boolean;
   answered: boolean;
   points: number;
@@ -454,13 +460,39 @@ function RoundResultView({
   totalPlayers: number;
 }) {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-4 p-6 text-center text-white">
-      <p className="text-6xl">{!answered ? "🤐" : isCorrect ? "🎯" : "😅"}</p>
-      <h1 className="text-3xl font-black">
+    <div className="flex flex-1 flex-col items-center gap-4 p-4 text-center text-white">
+      <p className="text-5xl">{!answered ? "🤐" : isCorrect ? "🎯" : "😅"}</p>
+      <h1 className="text-2xl font-black">
         {!answered ? "Bez odpowiedzi" : isCorrect ? "W punkt!" : "Kulą w płot"}
       </h1>
-      <p className={`text-2xl font-black ${gradientText}`}>+{points} pkt</p>
-      <div className={`mt-4 px-6 py-4 ${card}`}>
+      <p className={`text-xl font-black ${gradientText}`}>+{points} pkt</p>
+
+      <div className="grid w-full max-w-sm grid-cols-1 gap-2">
+        {question.options.map((opt, i) => {
+          const style = ANSWER_STYLES[i];
+          const isRightAnswer = i === question.correct_index;
+          const wasPicked = i === selectedIndex;
+          return (
+            <div
+              key={i}
+              className={`flex items-center gap-3 rounded-xl border-2 border-black px-4 py-3 text-left text-sm font-black ${
+                isRightAnswer
+                  ? `text-black ${style.bg} ${style.shadow}`
+                  : "border-white/10 bg-white/5 text-white/40"
+              }`}
+            >
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 border-black bg-white text-base">
+                {style.icon}
+              </span>
+              <span className="flex-1">{opt}</span>
+              {isRightAnswer && <span>✓</span>}
+              {wasPicked && !isRightAnswer && <span>👈 Ty</span>}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className={`mt-2 px-6 py-4 ${card}`}>
         <p className="text-lg">
           Twój wynik: <span className="font-black">{totalScore}</span>
         </p>

@@ -126,7 +126,7 @@ export default function HostRoom({ roomCode }: { roomCode: string }) {
 
     setQuestion(null);
     setAnsweredPlayerIds(new Set());
-    fetch(`/api/rooms/${roomCode}/question`)
+    fetch(`/api/rooms/${roomCode}/question?index=${room.current_question_index}`)
       .then((res) => res.json())
       .then((data) => {
         setQuestion(data.question);
@@ -142,7 +142,7 @@ export default function HostRoom({ roomCode }: { roomCode: string }) {
     loadedResultKeyRef.current = key;
     setResultRevealedAt(new Date().toISOString());
 
-    fetch(`/api/rooms/${roomCode}/question?reveal=1`)
+    fetch(`/api/rooms/${roomCode}/question?reveal=1&index=${room.current_question_index}`)
       .then((res) => res.json())
       .then((data) => {
         setQuestion(data.question);

@@ -27,6 +27,27 @@ export async function POST(
     return NextResponse.json({ error: "Brak czasu startu rundy." }, { status: 500 });
   }
 
+  // Claim the round atomically before scoring anything. The timeout timer
+  // and the "everyone answered" check can both fire close together, and
+  // without this a duplicate call would add every player's points twice --
+  // player_score updates below are `current + earned`, not idempotent. If
+  // zero rows come back, another call already claimed this round; treat it
+  // as a no-op instead of scoring a second time.
+  const { data: claimed, error: claimError } = await supabase
+    .from("rooms")
+    .update({ status: "round_result" })
+    .eq("id", room.id)
+    .eq("status", "in_progress")
+    .eq("current_question_index", room.current_question_index)
+    .select();
+
+  if (claimError) {
+    return NextResponse.json({ error: "Nie udało się zakończyć rundy." }, { status: 500 });
+  }
+  if (!claimed || claimed.length === 0) {
+    return NextResponse.json({ ok: true, applied: false });
+  }
+
   const { data: question, error: questionError } = await supabase
     .from("questions")
     .select("id, correct_index")
@@ -96,14 +117,5 @@ export async function POST(
     }
   }
 
-  const { error: updateRoomError } = await supabase
-    .from("rooms")
-    .update({ status: "round_result" })
-    .eq("id", room.id);
-
-  if (updateRoomError) {
-    return NextResponse.json({ error: "Nie udało się zakończyć rundy." }, { status: 500 });
-  }
-
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, applied: true });
 }

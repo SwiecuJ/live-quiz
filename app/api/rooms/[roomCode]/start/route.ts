@@ -41,7 +41,8 @@ export async function POST(
       current_question_index: 0,
       question_start_at: new Date().toISOString(),
     })
-    .eq("id", room.id);
+    .eq("id", room.id)
+    .eq("status", "lobby");
 
   if (updateError) {
     return NextResponse.json({ error: "Nie udało się wystartować quizu." }, { status: 500 });

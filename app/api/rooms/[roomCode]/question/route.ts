@@ -4,13 +4,23 @@ import { createServiceRoleClient } from "@/lib/supabase/server";
 export const runtime = "nodejs";
 
 /**
- * Returns the room's current question. The `questions` table has no public
- * RLS policy (only the service role can read it), so both host and player
- * screens fetch the question through this route instead of querying
+ * Returns a question for the room's quiz. The `questions` table has no
+ * public RLS policy (only the service role can read it), so both host and
+ * player screens fetch questions through this route instead of querying
  * Supabase directly with the anon key. `correct_index` is only included
  * when `?reveal=1` is passed, which the UI only does once a round has
  * ended -- keeping the answer out of the response while the round timer
  * is still running.
+ *
+ * `?index=N` pins the response to a specific round. Callers should always
+ * pass the index they observed via realtime at the moment they started the
+ * fetch: if this endpoint instead read room.current_question_index itself,
+ * a round that advances while the request is still in flight (real mobile
+ * latency, or the auto-advance timer) would make the response silently
+ * drift to a *later* round than the one the caller actually asked about --
+ * which surfaced as answers looking up the wrong question_id and getting
+ * shown as "no answer". Falls back to the room's current index only when
+ * `index` is omitted.
  */
 export async function GET(
   req: NextRequest,
@@ -18,6 +28,7 @@ export async function GET(
 ) {
   const { roomCode } = await params;
   const reveal = req.nextUrl.searchParams.get("reveal") === "1";
+  const indexParam = req.nextUrl.searchParams.get("index");
 
   const supabase = createServiceRoleClient();
 
@@ -30,7 +41,9 @@ export async function GET(
   if (roomError || !room) {
     return NextResponse.json({ error: "Nie znaleziono pokoju." }, { status: 404 });
   }
-  if (room.current_question_index < 0) {
+
+  const questionIndex = indexParam !== null ? Number(indexParam) : room.current_question_index;
+  if (!Number.isInteger(questionIndex) || questionIndex < 0) {
     return NextResponse.json({ error: "Quiz jeszcze się nie rozpoczął." }, { status: 409 });
   }
 
@@ -42,7 +55,7 @@ export async function GET(
     .from("questions")
     .select(columns)
     .eq("quiz_id", room.quiz_id)
-    .eq("order_index", room.current_question_index)
+    .eq("order_index", questionIndex)
     .single();
 
   if (questionError || !question) {
