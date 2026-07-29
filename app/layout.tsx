@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Quizownia",
-  description: "Quiz na żywo napędzany przez AI",
+  description: "Quiz na żywo z pytaniami robionymi na poczekaniu",
 };
 
 export default function RootLayout({

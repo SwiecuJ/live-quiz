@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { QRCodeSVG } from "qrcode.react";
 import { supabase } from "@/lib/supabase/client";
 import { useCountdown } from "@/lib/useCountdown";
@@ -134,13 +135,20 @@ export default function HostRoom({ roomCode }: { roomCode: string }) {
     if (loadedQuestionKeyRef.current === key) return;
     loadedQuestionKeyRef.current = key;
 
+    let cancelled = false;
     setQuestion(null);
     fetch(`/api/rooms/${roomCode}/question?index=${room.current_question_index}`)
       .then((res) => res.json())
       .then((data) => {
+        // The round may have already moved on by the time this resolves --
+        // applying a stale response would show the wrong question.
+        if (cancelled) return;
         setQuestion(data.question);
         setTotalQuestions(data.totalQuestions);
       });
+    return () => {
+      cancelled = true;
+    };
   }, [room, roomCode]);
 
   // Fetch the revealed question + answers once a round ends.
@@ -151,9 +159,11 @@ export default function HostRoom({ roomCode }: { roomCode: string }) {
     loadedResultKeyRef.current = key;
     setResultRevealedAt(new Date().toISOString());
 
+    let cancelled = false;
     fetch(`/api/rooms/${roomCode}/question?reveal=1&index=${room.current_question_index}`)
       .then((res) => res.json())
       .then((data) => {
+        if (cancelled) return data;
         setQuestion(data.question);
         setTotalQuestions(data.totalQuestions);
         return supabase
@@ -164,8 +174,12 @@ export default function HostRoom({ roomCode }: { roomCode: string }) {
           .order("points_awarded", { ascending: false });
       })
       .then((res) => {
+        if (cancelled) return;
         if (res && "data" in res && res.data) setRoundAnswers(res.data as AnswerRow[]);
       });
+    return () => {
+      cancelled = true;
+    };
   }, [room, roomCode]);
 
   const { remainingSeconds, fraction, isDone } = useCountdown(
@@ -521,6 +535,7 @@ function RoundResultView({
 }
 
 function FinalView({ players }: { players: Player[] }) {
+  const router = useRouter();
   const podium = players.slice(0, 3);
   const medals = ["🥇", "🥈", "🥉"];
 
@@ -561,6 +576,10 @@ function FinalView({ players }: { players: Player[] }) {
           ))}
         </ol>
       </div>
+
+      <button onClick={() => router.push("/")} className={primaryButton + " text-lg"}>
+        Nowy quiz 🔁
+      </button>
     </div>
   );
 }

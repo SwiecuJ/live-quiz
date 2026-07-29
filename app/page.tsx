@@ -59,13 +59,13 @@ export default function Home() {
     <div className="flex flex-1 flex-col items-center justify-center px-4 py-16">
       <div className="w-full max-w-3xl text-center">
         <span className="inline-block -rotate-2 rounded-full border-2 border-black bg-lime-300 px-4 py-1 text-xs font-black uppercase tracking-widest text-black shadow-[3px_3px_0_0_#000]">
-          Quiz na żywo, ogarnia go AI ⚡
+          Quiz na żywo, gotowy w 10 sekund ⚡
         </span>
         <h1 className={`mt-5 text-6xl font-black tracking-tight sm:text-7xl ${gradientText}`}>
           Quizownia
         </h1>
         <p className="mt-3 text-lg text-white/60">
-          Wrzuć temat, AI ogarnie pytania. Albo wskakuj do gry kumpla kodem 🎉
+          Wrzuć temat, pytania zrobią się same. Albo wskakuj do gry kumpla kodem 🎉
         </p>
       </div>
 
@@ -105,7 +105,7 @@ export default function Home() {
           {createError && <p className="text-sm font-semibold text-rose-400">{createError}</p>}
 
           <button type="submit" disabled={creating} className={`mt-2 ${primaryButton}`}>
-            {creating ? "AI kuma temat…" : "Odpalamy! 🚀"}
+            {creating ? "Kuma temat…" : "Odpalamy! 🚀"}
           </button>
         </form>
 

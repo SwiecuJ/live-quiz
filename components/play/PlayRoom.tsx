@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, FormEvent } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 import { useCountdown } from "@/lib/useCountdown";
 import { ANSWER_STYLES } from "@/lib/answerStyles";
@@ -130,6 +131,7 @@ export default function PlayRoom({ roomCode }: { roomCode: string }) {
     if (loadedQuestionKeyRef.current === key) return;
     loadedQuestionKeyRef.current = key;
 
+    let cancelled = false;
     setQuestion(null);
     setSelectedIndex(null);
     setOwnPoints(null);
@@ -137,9 +139,16 @@ export default function PlayRoom({ roomCode }: { roomCode: string }) {
     fetch(`/api/rooms/${roomCode}/question?index=${room.current_question_index}`)
       .then((res) => res.json())
       .then((data) => {
+        // The round may have already moved on by the time this resolves
+        // (real network latency + fast auto-advance) -- applying a stale
+        // response here would show the wrong question for the round.
+        if (cancelled) return;
         setQuestion(data.question);
         setTotalQuestions(data.totalQuestions);
       });
+    return () => {
+      cancelled = true;
+    };
   }, [room, roomCode]);
 
   // Fetch the revealed answer + own score once the round ends.
@@ -149,9 +158,11 @@ export default function PlayRoom({ roomCode }: { roomCode: string }) {
     if (loadedResultKeyRef.current === key) return;
     loadedResultKeyRef.current = key;
 
+    let cancelled = false;
     fetch(`/api/rooms/${roomCode}/question?reveal=1&index=${room.current_question_index}`)
       .then((res) => res.json())
       .then((data) => {
+        if (cancelled) return data;
         setQuestion(data.question);
         setTotalQuestions(data.totalQuestions);
         return supabase
@@ -162,11 +173,19 @@ export default function PlayRoom({ roomCode }: { roomCode: string }) {
           .maybeSingle();
       })
       .then((res) => {
+        // Same staleness guard: if the player already moved on to the next
+        // round, this would otherwise overwrite the fresh round's
+        // selectedIndex with the PREVIOUS round's answer, making an
+        // unanswered question look already-answered.
+        if (cancelled) return;
         if (res && "data" in res) {
           setSelectedIndex(res.data?.selected_index ?? null);
           setOwnPoints(res.data?.points_awarded ?? 0);
         }
       });
+    return () => {
+      cancelled = true;
+    };
   }, [room, roomCode, player]);
 
   const { remainingSeconds, fraction } = useCountdown(
@@ -412,30 +431,33 @@ function AnswerView({
         {question.question_text}
       </h2>
 
-      {hasAnswered ? (
-        <div className={`flex flex-col items-center justify-center gap-2 p-8 text-center ${card}`}>
-          <p className="text-xl font-black">Strzelone! 🎯</p>
-          <p className="text-white/60">Czekamy na resztę ekipy…</p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-2 gap-3">
-          {question.options.map((opt, i) => {
-            const style = ANSWER_STYLES[i];
-            return (
-              <button
-                key={i}
-                onClick={() => onAnswer(i)}
-                className={`flex min-h-[120px] flex-col items-center justify-center gap-3 rounded-2xl border-2 border-black px-3 py-4 text-center text-lg font-black text-black transition-transform active:scale-95 ${style.bg} ${style.shadow}`}
-              >
-                <span className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-black bg-white text-2xl">
-                  {style.icon}
-                </span>
-                {opt}
-              </button>
-            );
-          })}
-        </div>
+      {hasAnswered && (
+        <p className="text-center text-sm font-bold text-white/60">
+          Strzelone! 🎯 Czekamy na resztę ekipy…
+        </p>
       )}
+
+      <div className="grid grid-cols-2 gap-3">
+        {question.options.map((opt, i) => {
+          const style = ANSWER_STYLES[i];
+          const isPicked = i === selectedIndex;
+          return (
+            <button
+              key={i}
+              onClick={() => onAnswer(i)}
+              disabled={hasAnswered}
+              className={`flex min-h-[120px] flex-col items-center justify-center gap-3 rounded-2xl border-2 border-black px-3 py-4 text-center text-lg font-black text-black transition-all active:scale-95 disabled:active:scale-100 ${style.bg} ${style.shadow} ${
+                hasAnswered && !isPicked ? "opacity-40" : ""
+              } ${isPicked ? "ring-4 ring-white" : ""}`}
+            >
+              <span className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-black bg-white text-2xl">
+                {style.icon}
+              </span>
+              {opt}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -517,6 +539,8 @@ function FinalView({
   rank: number | null;
   totalScore: number;
 }) {
+  const router = useRouter();
+
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-4 p-6 text-center text-white">
       <p className="text-6xl">🏁</p>
@@ -528,6 +552,9 @@ function FinalView({
       <p className="text-lg">
         Ostateczny wynik: <span className="font-black">{totalScore}</span>
       </p>
+      <button onClick={() => router.push("/")} className={primaryButton + " mt-2 text-lg"}>
+        Nowy quiz 🔁
+      </button>
     </div>
   );
 }
