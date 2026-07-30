@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState, FormEvent } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, FormEvent } from "react";
+import { useRouter } from "next/navigation";
+import { QRCodeSVG } from "qrcode.react";
 import { supabase } from "@/lib/supabase/client";
-import { useCountdown } from "@/lib/useCountdown";
+import { useGameDriver } from "@/lib/useGameDriver";
 import { ANSWER_STYLES } from "@/lib/answerStyles";
 import { avatarFor } from "@/lib/avatar";
 import { card, gradientText, primaryButton, inputBase } from "@/lib/theme";
-import { NEXT_QUESTION_DELAY_SECONDS } from "@/lib/constants";
+import { isMarkedHost, markAsHost } from "@/lib/hostStorage";
 import type { Player, Room } from "@/lib/types";
 
 interface QuestionPayload {
@@ -33,6 +35,13 @@ function storageKey(roomCode: string) {
   return `live-quiz-player-${roomCode}`;
 }
 
+// The host marker lives in localStorage, which doesn't exist while this
+// renders on the server. useSyncExternalStore is how you read that safely:
+// the server snapshot is "not host", so the markup matches on hydration and
+// then corrects itself on the client. It never changes underneath us, hence
+// the no-op subscribe.
+const noopSubscribe = () => () => {};
+
 export default function PlayRoom({ roomCode }: { roomCode: string }) {
   const [room, setRoom] = useState<Room | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -42,21 +51,27 @@ export default function PlayRoom({ roomCode }: { roomCode: string }) {
   const [joining, setJoining] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
 
+  // Whether this phone is also running the game: either it created the room,
+  // or someone tapped "I'm hosting" in the lobby.
+  const storedHost = useSyncExternalStore(
+    noopSubscribe,
+    () => isMarkedHost(roomCode),
+    () => false
+  );
+  const [claimedHost, setClaimedHost] = useState(false);
+  const isHost = storedHost || claimedHost;
+  const [starting, setStarting] = useState(false);
+
   const [players, setPlayers] = useState<Player[]>([]);
   const [question, setQuestion] = useState<QuestionPayload | null>(null);
   const [totalQuestions, setTotalQuestions] = useState(0);
 
   // Keyed by question_id rather than reset-per-round: a round transition
   // can't corrupt a previous round's entry, and a late-arriving reveal
-  // response can't overwrite the wrong round's answer either. Same fix as
-  // HostRoom's answered-count tracking, applied to "what did *I* pick".
+  // response can't overwrite the wrong round's answer either.
   const [myAnswers, setMyAnswers] = useState<Record<string, MyAnswer>>({});
   const [answering, setAnswering] = useState(false);
   const [answerError, setAnswerError] = useState<string | null>(null);
-  // Tagged with the round it belongs to -- see HostRoom for why an untagged
-  // timestamp here reads as "already elapsed" on the first render of a new
-  // round and makes the countdown show 0s.
-  const [resultRevealed, setResultRevealed] = useState<{ key: string; at: string } | null>(null);
 
   // The round result to actually display right now, independent of what
   // room.status has moved on to. Set the moment reveal data for a round
@@ -195,7 +210,6 @@ export default function PlayRoom({ roomCode }: { roomCode: string }) {
     const key = `${room.status}-${room.current_question_index}`;
     if (loadedResultKeyRef.current === key) return;
     loadedResultKeyRef.current = key;
-    setResultRevealed({ key, at: new Date().toISOString() });
 
     fetch(
       `/api/rooms/${roomCode}/question?reveal=1&index=${room.current_question_index}&playerId=${player.id}`
@@ -206,8 +220,6 @@ export default function PlayRoom({ roomCode }: { roomCode: string }) {
           selectedIndex: data.yourAnswer?.selected_index ?? -1,
           points: data.yourAnswer?.points_awarded ?? 0,
         };
-        // Keyed by question_id, so this can never clobber a different
-        // round's entry even if it arrives late.
         setMyAnswers((prev) => ({ ...prev, [data.question.id]: revealedAnswer }));
 
         setResultToShow({ question: data.question, myAnswer: revealedAnswer });
@@ -223,18 +235,20 @@ export default function PlayRoom({ roomCode }: { roomCode: string }) {
     };
   }, []);
 
-  const { remainingSeconds, fraction } = useCountdown(
-    room?.status === "in_progress" ? room.question_start_at : null,
-    room?.round_time_seconds ?? 20
-  );
+  // Guard against a stale `question` from the previous round while the new
+  // one is still loading -- otherwise a fast tap can insert an answer
+  // against the wrong question_id, which then shows up as "no answer".
+  const currentQuestionReady = question?.order_index === room?.current_question_index;
 
-  const roundKey = room ? `${room.status}-${room.current_question_index}` : null;
-  const nextCountdown = useCountdown(
-    room?.status === "round_result" && resultRevealed?.key === roundKey
-      ? resultRevealed.at
-      : null,
-    NEXT_QUESTION_DELAY_SECONDS
-  );
+  // When this phone is the host it runs the exact same game logic the big
+  // screen does; otherwise the hook just supplies the countdown for display.
+  const { remainingSeconds, fraction, nextInSeconds } = useGameDriver({
+    roomCode,
+    room,
+    questionId: currentQuestionReady && question ? question.id : null,
+    playerCount: players.length,
+    isDriver: isHost,
+  });
 
   async function handleJoin(e: FormEvent) {
     e.preventDefault();
@@ -258,6 +272,17 @@ export default function PlayRoom({ roomCode }: { roomCode: string }) {
 
     localStorage.setItem(storageKey(roomCode), data.id);
     setPlayer(data as Player);
+  }
+
+  async function handleStart() {
+    setStarting(true);
+    await fetch(`/api/rooms/${roomCode}/start`, { method: "POST" });
+    setStarting(false);
+  }
+
+  function handleClaimHost() {
+    markAsHost(roomCode);
+    setClaimedHost(true);
   }
 
   async function handleAnswer(index: number) {
@@ -305,6 +330,7 @@ export default function PlayRoom({ roomCode }: { roomCode: string }) {
     return (
       <JoinView
         roomCode={roomCode}
+        isHost={isHost}
         nickname={nickname}
         setNickname={setNickname}
         joining={joining}
@@ -315,10 +341,22 @@ export default function PlayRoom({ roomCode }: { roomCode: string }) {
   }
 
   if (room.status === "lobby") {
-    return (
-      <CenteredMessage
-        title={`${avatarFor(player.id)} ${player.nickname}!`}
-        message="Czekaj na start, zaraz się zaczyna 🔥"
+    const joinUrl =
+      typeof window !== "undefined" ? `${window.location.origin}/play/${roomCode}` : "";
+    return isHost ? (
+      <HostLobbyView
+        roomCode={roomCode}
+        joinUrl={joinUrl}
+        players={players}
+        starting={starting}
+        onStart={handleStart}
+      />
+    ) : (
+      <WaitingView
+        player={player}
+        roomCode={roomCode}
+        players={players}
+        onClaimHost={handleClaimHost}
       />
     );
   }
@@ -341,15 +379,11 @@ export default function PlayRoom({ roomCode }: { roomCode: string }) {
         totalScore={players.find((p) => p.id === player.id)?.total_score ?? player.total_score}
         rank={rank || null}
         totalPlayers={players.length}
-        nextInSeconds={nextCountdown.remainingSeconds}
+        nextInSeconds={nextInSeconds}
       />
     );
   }
 
-  // Guard against a stale `question` from the previous round while the new
-  // one is still loading -- otherwise a fast tap can insert an answer
-  // against the wrong question_id, which then shows up as "no answer".
-  const currentQuestionReady = question?.order_index === room.current_question_index;
   const myAnswer = question ? myAnswers[question.id] : undefined;
 
   if (room.status === "in_progress" && !currentQuestionReady) {
@@ -384,6 +418,8 @@ export default function PlayRoom({ roomCode }: { roomCode: string }) {
         avatar={avatarFor(player.id)}
         rank={rank || null}
         totalScore={totalScore}
+        isHost={isHost}
+        players={players}
       />
     );
   }
@@ -402,6 +438,7 @@ function CenteredMessage({ title, message }: { title: string; message: string })
 
 function JoinView({
   roomCode,
+  isHost,
   nickname,
   setNickname,
   joining,
@@ -409,6 +446,7 @@ function JoinView({
   onJoin,
 }: {
   roomCode: string;
+  isHost: boolean;
   nickname: string;
   setNickname: (v: string) => void;
   joining: boolean;
@@ -421,6 +459,11 @@ function JoinView({
         Pokój <span className={`font-black ${gradientText}`}>{roomCode}</span>
       </p>
       <form onSubmit={onJoin} className={`flex w-full max-w-sm flex-col gap-4 p-6 ${card}`}>
+        {isHost && (
+          <p className="-mt-1 text-center text-xs font-black uppercase tracking-widest text-lime-300">
+            🎛️ Hostujesz z telefonu
+          </p>
+        )}
         <h1 className="text-center text-xl font-black text-white">Jak Cię zawołać? 👋</h1>
         <input
           value={nickname}
@@ -436,6 +479,105 @@ function JoinView({
           {joining ? "Wskakuję…" : "Wskakuję!"}
         </button>
       </form>
+    </div>
+  );
+}
+
+/** Lobby as seen by the organiser hosting from their own phone. */
+function HostLobbyView({
+  roomCode,
+  joinUrl,
+  players,
+  starting,
+  onStart,
+}: {
+  roomCode: string;
+  joinUrl: string;
+  players: Player[];
+  starting: boolean;
+  onStart: () => void;
+}) {
+  return (
+    <div className="flex flex-1 flex-col items-center gap-5 p-5 text-center text-white">
+      <p className="text-sm font-bold text-white/60">Pokaż im ten kod 👇</p>
+      <p className={`text-5xl font-black tracking-[0.15em] ${gradientText}`}>{roomCode}</p>
+
+      {joinUrl && (
+        <div className={`p-3 ${card}`}>
+          <div className="rounded-2xl bg-white p-3">
+            <QRCodeSVG value={joinUrl} size={180} />
+          </div>
+        </div>
+      )}
+
+      <div className={`w-full max-w-sm p-4 ${card}`}>
+        <p className="mb-3 text-base font-black">Ekipa ({players.length})</p>
+        {players.length === 0 ? (
+          <p className="text-sm text-white/50">Czekamy… kto pierwszy? 👀</p>
+        ) : (
+          <div className="flex flex-wrap justify-center gap-2">
+            {players.map((p) => (
+              <span
+                key={p.id}
+                className="rounded-full border-2 border-black bg-white px-3 py-1.5 text-sm font-bold text-black shadow-[3px_3px_0_0_#000]"
+              >
+                {avatarFor(p.id)} {p.nickname}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <button
+        onClick={onStart}
+        disabled={players.length === 0 || starting}
+        className={primaryButton + " text-lg"}
+      >
+        {starting ? "Startujemy…" : "Zaczynamy! 🎉"}
+      </button>
+    </div>
+  );
+}
+
+/** Lobby as seen by an ordinary player waiting for the organiser. */
+function WaitingView({
+  player,
+  roomCode,
+  players,
+  onClaimHost,
+}: {
+  player: Player;
+  roomCode: string;
+  players: Player[];
+  onClaimHost: () => void;
+}) {
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center gap-4 p-6 text-center text-white">
+      <h1 className="text-2xl font-black">
+        {avatarFor(player.id)} {player.nickname}!
+      </h1>
+      <p className="text-white/60">Czekaj na start, zaraz się zaczyna 🔥</p>
+
+      <div className={`mt-2 w-full max-w-sm p-4 ${card}`}>
+        <p className="mb-3 text-sm font-black text-white/70">Ekipa ({players.length})</p>
+        <div className="flex flex-wrap justify-center gap-2">
+          {players.map((p) => (
+            <span
+              key={p.id}
+              className="rounded-full border-2 border-black bg-white px-3 py-1.5 text-sm font-bold text-black shadow-[3px_3px_0_0_#000]"
+            >
+              {avatarFor(p.id)} {p.nickname}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      <button
+        onClick={onClaimHost}
+        className="mt-2 text-sm font-bold text-white/40 underline underline-offset-4"
+      >
+        To ja hostuję pokój {roomCode} 🎛️
+      </button>
     </div>
   );
 }
@@ -594,12 +736,19 @@ function FinalView({
   avatar,
   rank,
   totalScore,
+  isHost,
+  players,
 }: {
   nickname: string;
   avatar: string;
   rank: number | null;
   totalScore: number;
+  isHost: boolean;
+  players: Player[];
 }) {
+  const router = useRouter();
+  const medals = ["🥇", "🥈", "🥉"];
+
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-4 p-6 text-center text-white">
       <p className="text-6xl">🏁</p>
@@ -611,7 +760,34 @@ function FinalView({
       <p className="text-lg">
         Ostateczny wynik: <span className="font-black">{totalScore}</span>
       </p>
-      <p className="text-sm text-white/40">Czekaj, aż host odpali nowy quiz 🎉</p>
+
+      {/* Without a big screen there's nowhere else to see the final table. */}
+      {isHost && (
+        <div className={`mt-2 w-full max-w-sm p-4 ${card}`}>
+          <p className="mb-3 text-sm font-black text-white/70">Tabela końcowa 🏆</p>
+          <ol className="flex flex-col gap-2">
+            {players.map((p, i) => (
+              <li
+                key={p.id}
+                className="flex justify-between rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm"
+              >
+                <span>
+                  {medals[i] ?? `${i + 1}.`} {avatarFor(p.id)} {p.nickname}
+                </span>
+                <span className="font-black">{p.total_score}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+
+      {isHost ? (
+        <button onClick={() => router.push("/")} className={primaryButton + " mt-2 text-lg"}>
+          Nowy quiz 🔁
+        </button>
+      ) : (
+        <p className="text-sm text-white/40">Czekaj, aż host odpali nowy quiz 🎉</p>
+      )}
     </div>
   );
 }

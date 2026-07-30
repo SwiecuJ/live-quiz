@@ -3,14 +3,17 @@
 import { useState, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { card, gradientText, primaryButton, inputBase } from "@/lib/theme";
+import { markAsHost } from "@/lib/hostStorage";
 
 const ROUND_OPTIONS = [5, 10, 15] as const;
+type HostMode = "screen" | "phone";
 
 export default function Home() {
   const router = useRouter();
 
   const [prompt, setPrompt] = useState("");
   const [rounds, setRounds] = useState<(typeof ROUND_OPTIONS)[number]>(10);
+  const [hostMode, setHostMode] = useState<HostMode>("screen");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
@@ -38,7 +41,14 @@ export default function Home() {
         return;
       }
 
-      router.push(`/host/${data.roomCode}`);
+      if (hostMode === "phone") {
+        // This device runs the game AND plays, so it goes to the player
+        // screen -- the host lobby there shows the QR for everyone else.
+        markAsHost(data.roomCode);
+        router.push(`/play/${data.roomCode}`);
+      } else {
+        router.push(`/host/${data.roomCode}`);
+      }
     } catch {
       setCreateError("Ups, sieć się posypała. Spróbuj ponownie.");
       setCreating(false);
@@ -101,6 +111,37 @@ export default function Home() {
               ))}
             </select>
           </label>
+
+          <div className="flex flex-col gap-2 text-left text-sm font-semibold text-white/70">
+            Gdzie pokazujesz pytania?
+            <div className="grid grid-cols-2 gap-2">
+              {(
+                [
+                  { mode: "screen" as const, label: "Na tym ekranie", icon: "🖥️" },
+                  { mode: "phone" as const, label: "Z mojego telefonu", icon: "📱" },
+                ] satisfies { mode: HostMode; label: string; icon: string }[]
+              ).map((opt) => (
+                <button
+                  key={opt.mode}
+                  type="button"
+                  onClick={() => setHostMode(opt.mode)}
+                  className={`rounded-xl border-2 px-3 py-3 text-center text-sm font-black transition-all ${
+                    hostMode === opt.mode
+                      ? "border-black bg-lime-300 text-black shadow-[4px_4px_0_0_#000]"
+                      : "border-white/15 bg-white/5 text-white/60"
+                  }`}
+                >
+                  <span className="block text-xl">{opt.icon}</span>
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs font-medium text-white/40">
+              {hostMode === "screen"
+                ? "Kod QR na dużym ekranie, Ty tylko prowadzisz."
+                : "Kod QR na Twoim telefonie i grasz razem z resztą."}
+            </p>
+          </div>
 
           {createError && <p className="text-sm font-semibold text-rose-400">{createError}</p>}
 

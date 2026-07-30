@@ -1,14 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { QRCodeSVG } from "qrcode.react";
 import { supabase } from "@/lib/supabase/client";
-import { useCountdown } from "@/lib/useCountdown";
+import { useGameDriver } from "@/lib/useGameDriver";
 import { ANSWER_STYLES } from "@/lib/answerStyles";
 import { avatarFor } from "@/lib/avatar";
 import { card, gradientText, primaryButton } from "@/lib/theme";
-import { NEXT_QUESTION_DELAY_SECONDS } from "@/lib/constants";
 import type { Player, Room } from "@/lib/types";
 
 interface QuestionPayload {
@@ -50,35 +49,17 @@ export default function HostRoom({ roomCode }: { roomCode: string }) {
 
   const [question, setQuestion] = useState<QuestionPayload | null>(null);
   const [totalQuestions, setTotalQuestions] = useState(0);
-  // Append-only log of every answer INSERT seen over realtime, each tagged
-  // with its question_id. Deliberately never reset per-round: filtering by
-  // the *current* question's id at read time is what makes "has everyone
-  // answered" correct, instead of a Set that gets cleared in one effect
-  // and read (still stale) by another effect in the same render pass.
-  const [answerEvents, setAnswerEvents] = useState<{ player_id: string; question_id: string }[]>(
-    []
-  );
   const [roundAnswers, setRoundAnswers] = useState<AnswerRow[]>([]);
 
   const [starting, setStarting] = useState(false);
   const [advancing, setAdvancing] = useState(false);
-  // Tagged with the round it belongs to. This is separate state set from an
-  // effect, so it necessarily lags `room` by one render: on the first render
-  // after a new round_result arrives it still holds the PREVIOUS round's
-  // timestamp. Untagged, that stale timestamp read as "the delay already
-  // elapsed", and the auto-advance below fired instantly -- skipping the
-  // round result. Comparing the tag against the live round makes that render
-  // resolve to null (countdown not started) instead of to a bogus deadline.
-  const [resultRevealed, setResultRevealed] = useState<{ key: string; at: string } | null>(null);
   const [summary, setSummary] = useState<{
     questions: SummaryQuestion[];
     answers: SummaryAnswer[];
   } | null>(null);
 
-  const endedRoundKeyRef = useRef<string | null>(null);
   const loadedQuestionKeyRef = useRef<string | null>(null);
   const loadedResultKeyRef = useRef<string | null>(null);
-  const advancedKeyRef = useRef<string | null>(null);
   const refreshPlayersTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Initial room load.
@@ -135,17 +116,6 @@ export default function HostRoom({ roomCode }: { roomCode: string }) {
         { event: "*", schema: "public", table: "players", filter: `room_id=eq.${room.id}` },
         refreshPlayers
       )
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "answers", filter: `room_id=eq.${room.id}` },
-        (payload) => {
-          const row = payload.new as { player_id: string; question_id: string };
-          setAnswerEvents((prev) => [
-            ...prev,
-            { player_id: row.player_id, question_id: row.question_id },
-          ]);
-        }
-      )
       .subscribe();
 
     return () => {
@@ -183,7 +153,6 @@ export default function HostRoom({ roomCode }: { roomCode: string }) {
     const key = `${room.status}-${room.current_question_index}`;
     if (loadedResultKeyRef.current === key) return;
     loadedResultKeyRef.current = key;
-    setResultRevealed({ key, at: new Date().toISOString() });
 
     let cancelled = false;
     fetch(
@@ -209,56 +178,18 @@ export default function HostRoom({ roomCode }: { roomCode: string }) {
       .then((data) => setSummary({ questions: data.questions, answers: data.answers }));
   }, [room, roomCode, summary]);
 
-  const { remainingSeconds, fraction, isDone } = useCountdown(
-    room?.status === "in_progress" ? room.question_start_at : null,
-    room?.round_time_seconds ?? 20
-  );
-
-  const roundKey = room ? `${room.status}-${room.current_question_index}` : null;
-  const nextCountdown = useCountdown(
-    room?.status === "round_result" && resultRevealed?.key === roundKey
-      ? resultRevealed.at
-      : null,
-    NEXT_QUESTION_DELAY_SECONDS
-  );
-
-  // Filtered by the *current* question's id rather than reset-per-round --
-  // see the answerEvents state comment above for why that matters.
+  // Guard against a stale `question` left over from the previous round while
+  // the new one is still loading, which would otherwise show the wrong text
+  // and count answers against the wrong question.
   const currentQuestionReady = question?.order_index === room?.current_question_index;
-  const answeredCount =
-    currentQuestionReady && question
-      ? answerEvents.filter((e) => e.question_id === question.id).length
-      : 0;
 
-  const endRoundOnce = useCallback(() => {
-    if (!room) return;
-    const key = `${room.status}-${room.current_question_index}`;
-    if (endedRoundKeyRef.current === key) return;
-    endedRoundKeyRef.current = key;
-    fetch(`/api/rooms/${roomCode}/end-round`, { method: "POST" });
-  }, [room, roomCode]);
-
-  // Auto end the round once the timer runs out.
-  useEffect(() => {
-    if (!room || room.status !== "in_progress" || !isDone) return;
-    endRoundOnce();
-  }, [room, isDone, endRoundOnce]);
-
-  // Auto end the round early once every current player has answered.
-  useEffect(() => {
-    if (!room || room.status !== "in_progress" || !currentQuestionReady) return;
-    if (players.length === 0 || answeredCount < players.length) return;
-    endRoundOnce();
-  }, [room, players.length, answeredCount, currentQuestionReady, endRoundOnce]);
-
-  // Auto advance to the next question a few seconds after the round result is shown.
-  useEffect(() => {
-    if (!room || room.status !== "round_result" || !nextCountdown.isDone) return;
-    const key = `${room.status}-${room.current_question_index}`;
-    if (advancedKeyRef.current === key) return;
-    advancedKeyRef.current = key;
-    fetch(`/api/rooms/${roomCode}/next`, { method: "POST" });
-  }, [room, roomCode, nextCountdown.isDone]);
+  const { remainingSeconds, fraction, answeredCount, nextInSeconds, advanceOnce } = useGameDriver({
+    roomCode,
+    room,
+    questionId: currentQuestionReady && question ? question.id : null,
+    playerCount: players.length,
+    isDriver: true,
+  });
 
   async function handleStart() {
     setStarting(true);
@@ -267,11 +198,8 @@ export default function HostRoom({ roomCode }: { roomCode: string }) {
   }
 
   async function handleNext() {
-    if (room) {
-      advancedKeyRef.current = `${room.status}-${room.current_question_index}`;
-    }
     setAdvancing(true);
-    await fetch(`/api/rooms/${roomCode}/next`, { method: "POST" });
+    await advanceOnce();
     setAdvancing(false);
   }
 
@@ -325,7 +253,7 @@ export default function HostRoom({ roomCode }: { roomCode: string }) {
           isLastQuestion={room.current_question_index + 1 >= totalQuestions}
           advancing={advancing}
           onNext={handleNext}
-          nextInSeconds={nextCountdown.remainingSeconds}
+          nextInSeconds={nextInSeconds}
         />
       )}
 
