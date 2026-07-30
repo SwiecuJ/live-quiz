@@ -6,9 +6,8 @@ import { QRCodeSVG } from "qrcode.react";
 import { supabase } from "@/lib/supabase/client";
 import { avatarFor } from "@/lib/avatar";
 import { card, gradientText, primaryButton, inputBase } from "@/lib/theme";
-import { isMarkedHost, markAsHost } from "@/lib/hostStorage";
 import { getDeviceId, getSavedNickname, saveNickname } from "@/lib/identity";
-import { hostKeyFor } from "@/lib/ryzykfizyk/hostKey";
+import { getRfHostMode, setRfHostMode } from "@/lib/ryzykfizyk/hostKey";
 import { useRfDriver } from "@/lib/ryzykfizyk/useRfDriver";
 import {
   BET_AMOUNTS,
@@ -51,13 +50,16 @@ export default function RfRoom({ roomCode }: { roomCode: string }) {
   const [joining, setJoining] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
 
-  const storedHost = useSyncExternalStore(
+  const storedMode = useSyncExternalStore(
     noopSubscribe,
-    () => isMarkedHost(hostKeyFor(roomCode)),
-    () => false
+    () => getRfHostMode(roomCode),
+    () => null
   );
   const [claimedHost, setClaimedHost] = useState(false);
-  const isHost = storedHost || claimedHost;
+  const isHost = storedMode !== null || claimedHost;
+  // A screen host runs the game without sitting at the table, so it never
+  // asks for a nickname and shows the board instead of a hand.
+  const isScreenOnly = storedMode === "screen";
   const [starting, setStarting] = useState(false);
 
   // All keyed by round. The reveal data especially: the status flips over
@@ -217,7 +219,7 @@ export default function RfRoom({ roomCode }: { roomCode: string }) {
       });
   }, [room?.id, myId, phaseForBets, roundForBets]);
 
-  const { remainingSeconds, guessedThisRound } = useRfDriver({
+  const { remainingSeconds, guessedThisRound, betThisRound } = useRfDriver({
     roomCode,
     room,
     isHost,
@@ -298,13 +300,41 @@ export default function RfRoom({ roomCode }: { roomCode: string }) {
   }
 
   function handleClaimHost() {
-    markAsHost(hostKeyFor(roomCode));
+    // Claimed from the table, so this device is playing as well as running it.
+    setRfHostMode(roomCode, "play");
     setClaimedHost(true);
   }
 
   // ---- render ----------------------------------------------------------
   if (loadError) return <Centered title="Ups!" message={loadError} />;
   if (!room) return <Centered title="Chwila…" message="Ogarniam stolik." />;
+
+  const round = room.current_round;
+  const slots = (room.slots ?? []) as Slot[];
+  const question = questionByRound[round];
+  const roundLabel = `Runda ${round + 1} / ${totalRounds ?? "?"}`;
+  const joinUrl = typeof window !== "undefined" ? `${window.location.origin}/rf/${roomCode}` : "";
+
+  if (isScreenOnly) {
+    return (
+      <ScreenHostView
+        roomCode={roomCode}
+        joinUrl={joinUrl}
+        room={room}
+        players={players}
+        slots={slots}
+        questionText={question?.text}
+        unit={question?.unit ?? null}
+        reveal={revealByRound[round]}
+        roundLabel={roundLabel}
+        remainingSeconds={remainingSeconds}
+        guessedThisRound={guessedThisRound}
+        betThisRound={betThisRound}
+        starting={starting}
+        onStart={handleStart}
+      />
+    );
+  }
 
   if (!me) {
     return (
@@ -339,14 +369,9 @@ export default function RfRoom({ roomCode }: { roomCode: string }) {
     );
   }
 
-  const round = room.current_round;
-  const slots = (room.slots ?? []) as Slot[];
-  const question = questionByRound[round];
-  const roundLabel = `Runda ${round + 1} / ${totalRounds ?? "?"}`;
   const myBets = betsByRound[round] ?? [];
 
   if (room.status === "lobby") {
-    const joinUrl = typeof window !== "undefined" ? `${window.location.origin}/rf/${roomCode}` : "";
     return isHost ? (
       <div className="flex flex-1 flex-col items-center gap-5 p-5 text-center text-white">
         <p className="text-sm font-bold text-white/60">Pokaż im ten kod 👇</p>
@@ -656,6 +681,157 @@ function BettingPhase({
   );
 }
 
+/**
+ * The board as shown on a screen nobody is playing from: it drives the game
+ * and shows everyone what's happening, but has no hand of its own -- so no
+ * nickname, no guess box, no bet buttons.
+ */
+function ScreenHostView({
+  roomCode,
+  joinUrl,
+  room,
+  players,
+  slots,
+  questionText,
+  unit,
+  reveal,
+  roundLabel,
+  remainingSeconds,
+  guessedThisRound,
+  betThisRound,
+  starting,
+  onStart,
+}: {
+  roomCode: string;
+  joinUrl: string;
+  room: RfRoomRow;
+  players: RfPlayer[];
+  slots: Slot[];
+  questionText?: string;
+  unit: string | null;
+  reveal?: RoundReveal;
+  roundLabel: string;
+  remainingSeconds: number;
+  guessedThisRound: number;
+  betThisRound: number;
+  starting: boolean;
+  onStart: () => void;
+}) {
+  if (room.status === "lobby") {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-6 p-6 text-center text-white">
+        <p className="text-xl font-bold text-white/60">Wbijajcie na telefonach 📱</p>
+        <p className={`text-6xl font-black tracking-[0.2em] sm:text-8xl ${gradientText}`}>
+          {roomCode}
+        </p>
+        <div className="flex flex-col items-center gap-6 sm:flex-row sm:items-start sm:gap-10">
+          {joinUrl && (
+            <div className={`p-4 ${card}`}>
+              <div className="rounded-2xl bg-white p-3">
+                <QRCodeSVG value={joinUrl} size={200} />
+              </div>
+            </div>
+          )}
+          <PlayerChips players={players} />
+        </div>
+        <button
+          onClick={onStart}
+          disabled={players.length === 0 || starting}
+          className={primaryButton + " text-xl"}
+        >
+          {starting ? "Rozdaję…" : "Zaczynamy! 🎲"}
+        </button>
+      </div>
+    );
+  }
+
+  if (room.status === "finished") {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-6 p-6 text-center text-white">
+        <p className="text-6xl">🏁</p>
+        <h1 className={`text-4xl font-black sm:text-5xl ${gradientText}`}>Koniec gry!</h1>
+        <Standings players={players} meId={null} />
+        <Link href="/rf" className={primaryButton + " text-lg"}>
+          Nowa gra 🔁
+        </Link>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-1 flex-col gap-6 p-6 text-white">
+      <div className="flex items-center justify-between text-lg font-bold text-white/60">
+        <span>{roundLabel}</span>
+        <span>
+          {room.status === "guessing"
+            ? `${guessedThisRound} / ${players.length} wpisało`
+            : room.status === "betting"
+              ? `${betThisRound} / ${players.length} obstawiło`
+              : "Wyniki"}
+        </span>
+        <span className="tabular-nums">{remainingSeconds}s</span>
+      </div>
+
+      <h2 className="px-2 text-center text-3xl font-extrabold leading-snug sm:text-5xl">
+        {questionText ?? "…"}
+      </h2>
+
+      {room.status === "guessing" && (
+        <p className="text-center text-lg text-white/40">Wszyscy wpisują swoje typy…</p>
+      )}
+
+      {room.status === "betting" && (
+        <div className="mx-auto flex w-full max-w-2xl flex-col gap-2">
+          <p className="text-center text-sm font-bold text-white/40">
+            Który typ jest najbliżej — <span className="text-amber-300">ale nie za wysoko?</span>
+          </p>
+          {slots.map((slot) => (
+            <div
+              key={slot.key}
+              className="flex items-center gap-3 rounded-2xl border-2 border-white/15 bg-white/5 px-5 py-3"
+            >
+              <span className="flex-1 text-xl font-black">
+                {slot.value === null ? "Wszyscy przestrzelili" : slot.value.toLocaleString("pl")}
+              </span>
+              {slot.authorIds.length > 0 && (
+                <span className="text-base">
+                  {slot.authorIds.map((id) => avatarFor(id)).join("")}
+                </span>
+              )}
+              <span className="text-lg font-black text-amber-300">{slot.odds}×</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {room.status === "reveal" &&
+        (reveal ? (
+          <div className="flex flex-col items-center gap-3">
+            <p className="text-sm font-bold text-white/50">Prawidłowa odpowiedź</p>
+            <p className={`text-6xl font-black ${gradientText}`}>
+              {reveal.answer.toLocaleString("pl")}
+              {unit ? <span className="text-3xl"> {unit}</span> : null}
+            </p>
+            <p className="text-lg font-bold text-white/60">
+              {reveal.winningSlotKey === UNDER_SLOT_KEY
+                ? "Wszyscy przestrzelili! 🙈"
+                : `Wygrywa typ ${
+                    slots.find((s) => s.key === reveal.winningSlotKey)?.value?.toLocaleString("pl") ??
+                    "—"
+                  }`}
+            </p>
+          </div>
+        ) : (
+          <p className="text-center text-lg text-white/40">Liczę wypłaty 💰</p>
+        ))}
+
+      <div className="mx-auto w-full max-w-md">
+        <Standings players={players} meId={null} />
+      </div>
+    </div>
+  );
+}
+
 function Centered({ title, message }: { title: string; message: string }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center p-6 text-center text-white">
@@ -697,7 +873,7 @@ function PlayerChips({ players }: { players: RfPlayer[] }) {
   );
 }
 
-function Standings({ players, meId }: { players: RfPlayer[]; meId: string }) {
+function Standings({ players, meId }: { players: RfPlayer[]; meId: string | null }) {
   const medals = ["🥇", "🥈", "🥉"];
   return (
     <div className={`w-full max-w-sm p-4 ${card}`}>

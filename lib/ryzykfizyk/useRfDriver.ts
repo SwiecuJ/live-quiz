@@ -32,11 +32,13 @@ export function useRfDriver({
   isHost: boolean;
   playerCount: number;
 }) {
-  // Guesses are only tracked so the host can cut the phase short once
-  // everyone has typed a number; nobody else needs the firehose.
+  // Tracked only so the host can cut a phase short once everyone has acted;
+  // nobody else needs the firehose. Append-only and tagged with the round,
+  // so a round change can't leave a stale count behind.
   const [guessedPlayerIds, setGuessedPlayerIds] = useState<{ round: number; playerId: string }[]>(
     []
   );
+  const [betPlayerIds, setBetPlayerIds] = useState<{ round: number; playerId: string }[]>([]);
   const advancedKeyRef = useRef<string | null>(null);
 
   const phaseKey = room ? `${room.status}-${room.current_round}` : null;
@@ -64,6 +66,14 @@ export function useRfDriver({
           ]);
         }
       )
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "rf_bets", filter: `room_id=eq.${roomId}` },
+        (payload) => {
+          const row = payload.new as { player_id: string; round_index: number };
+          setBetPlayerIds((prev) => [...prev, { round: row.round_index, playerId: row.player_id }]);
+        }
+      )
       .subscribe();
 
     return () => {
@@ -75,6 +85,13 @@ export function useRfDriver({
     ? new Set(
         guessedPlayerIds.filter((g) => g.round === room.current_round).map((g) => g.playerId)
       ).size
+    : 0;
+
+  // Counted per player, not per bet: two bets from one person still means
+  // one person has acted.
+  const betThisRound = room
+    ? new Set(betPlayerIds.filter((b) => b.round === room.current_round).map((b) => b.playerId))
+        .size
     : 0;
 
   const advance = useCallback(() => {
@@ -91,13 +108,21 @@ export function useRfDriver({
   }, [isHost, room, phaseSeconds, isDone, advance]);
 
   // Everyone already typed a number, so there's nothing left to wait for.
-  // Betting has no equivalent: choosing not to bet is a real move, and
-  // there's no way to tell it apart from still thinking.
   useEffect(() => {
     if (!isHost || !room || room.status !== "guessing") return;
     if (playerCount === 0 || guessedThisRound < playerCount) return;
     advance();
   }, [isHost, room, playerCount, guessedThisRound, advance]);
 
-  return { remainingSeconds, fraction, guessedThisRound, advance };
+  // Same once everyone has staked something. Deliberately "at least one
+  // bet" rather than "used both": most rounds people back a single number,
+  // and waiting for a second one nobody intends to place would strand the
+  // table. Anyone who would rather not bet at all is carried by the timer.
+  useEffect(() => {
+    if (!isHost || !room || room.status !== "betting") return;
+    if (playerCount === 0 || betThisRound < playerCount) return;
+    advance();
+  }, [isHost, room, playerCount, betThisRound, advance]);
+
+  return { remainingSeconds, fraction, guessedThisRound, betThisRound, advance };
 }

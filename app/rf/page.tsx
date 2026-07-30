@@ -4,8 +4,7 @@ import { useState, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { card, gradientText, primaryButton, inputBase } from "@/lib/theme";
-import { markAsHost } from "@/lib/hostStorage";
-import { hostKeyFor } from "@/lib/ryzykfizyk/hostKey";
+import { setRfHostMode } from "@/lib/ryzykfizyk/hostKey";
 import { TOTAL_ROUNDS, START_BALANCE } from "@/lib/ryzykfizyk/betting";
 
 export default function RyzykFizykHome() {
@@ -13,6 +12,7 @@ export default function RyzykFizykHome() {
 
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [playsToo, setPlaysToo] = useState(false);
   const [joinCode, setJoinCode] = useState("");
 
   async function handleCreate() {
@@ -28,7 +28,7 @@ export default function RyzykFizykHome() {
         setCreating(false);
         return;
       }
-      markAsHost(hostKeyFor(data.roomCode));
+      setRfHostMode(data.roomCode, playsToo ? "play" : "screen");
       router.push(`/rf/${data.roomCode}`);
     } catch {
       setCreateError("Ups, sieć się posypała. Spróbuj ponownie.");
@@ -93,9 +93,26 @@ export default function RyzykFizykHome() {
       <div className="mt-6 grid w-full max-w-xl gap-4 sm:grid-cols-2">
         <div className={`flex flex-col gap-3 p-6 ${card}`}>
           <h2 className="text-lg font-black text-white">Odpal grę 🎰</h2>
-          <p className="text-xs font-medium text-white/40">
-            Kod QR pokażesz na swoim ekranie i grasz razem z ekipą.
-          </p>
+
+          {/* Same shape as Quizownia: showing the board is the default, and
+              sitting at the table on the same device is the opt-in. */}
+          <div className="flex flex-col gap-1">
+            <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-white/45 transition-colors hover:text-white/70">
+              <input
+                type="checkbox"
+                checked={playsToo}
+                onChange={(e) => setPlaysToo(e.target.checked)}
+                className="h-3.5 w-3.5 shrink-0 accent-amber-300"
+              />
+              Gram i prowadzę z tego urządzenia 📱
+            </label>
+            <p className="text-[11px] font-medium leading-snug text-white/30">
+              {playsToo
+                ? "Kod QR pokażesz na swoim ekranie i siadasz do stołu z resztą."
+                : "Bez tego ten ekran tylko pokazuje kod i typy — Ty grasz z telefonu."}
+            </p>
+          </div>
+
           {createError && <p className="text-sm font-semibold text-rose-400">{createError}</p>}
           <button onClick={handleCreate} disabled={creating} className={`mt-auto ${primaryButton}`}>
             {creating ? "Rozdaję żetony…" : "Odpalamy! 🚀"}
