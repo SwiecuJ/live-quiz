@@ -112,34 +112,22 @@ export default function Home() {
             </select>
           </label>
 
-          <div className="flex flex-col gap-2 text-left text-sm font-semibold text-white/70">
-            Gdzie pokazujesz pytania?
-            <div className="grid grid-cols-2 gap-2">
-              {(
-                [
-                  { mode: "screen" as const, label: "Na tym ekranie", icon: "🖥️" },
-                  { mode: "phone" as const, label: "Z mojego telefonu", icon: "📱" },
-                ] satisfies { mode: HostMode; label: string; icon: string }[]
-              ).map((opt) => (
-                <button
-                  key={opt.mode}
-                  type="button"
-                  onClick={() => setHostMode(opt.mode)}
-                  className={`rounded-xl border-2 px-3 py-3 text-center text-sm font-black transition-all ${
-                    hostMode === opt.mode
-                      ? "border-black bg-lime-300 text-black shadow-[4px_4px_0_0_#000]"
-                      : "border-white/15 bg-white/5 text-white/60"
-                  }`}
-                >
-                  <span className="block text-xl">{opt.icon}</span>
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-            <p className="text-xs font-medium text-white/40">
-              {hostMode === "screen"
-                ? "Kod QR na dużym ekranie, Ty tylko prowadzisz."
-                : "Kod QR na Twoim telefonie i grasz razem z resztą."}
+          {/* Hosting from the big screen is the default; playing along is the
+              opt-in, so it's fine print rather than an equal-weight choice. */}
+          <div className="flex flex-col gap-1 text-left">
+            <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-white/45 transition-colors hover:text-white/70">
+              <input
+                type="checkbox"
+                checked={hostMode === "phone"}
+                onChange={(e) => setHostMode(e.target.checked ? "phone" : "screen")}
+                className="h-3.5 w-3.5 shrink-0 accent-lime-300"
+              />
+              Gram i hostuję z tego urządzenia 📱
+            </label>
+            <p className="text-[11px] font-medium leading-snug text-white/30">
+              {hostMode === "phone"
+                ? "Kod QR pokażesz na swoim ekranie i grasz razem z ekipą."
+                : "Bez tego ten ekran tylko wyświetla pytania — Ty prowadzisz."}
             </p>
           </div>
 
