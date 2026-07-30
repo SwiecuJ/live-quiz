@@ -20,10 +20,13 @@ import {
 } from "@/lib/ryzykfizyk/betting";
 import type { RfBet, RfPlayer, RfRoom as RfRoomRow } from "@/lib/ryzykfizyk/types";
 
-interface QuestionState {
-  question: { id: string; text: string; unit: string | null } | null;
-  totalRounds: number;
-  answer: number | null;
+interface RoundQuestion {
+  text: string;
+  unit: string | null;
+}
+
+interface RoundReveal {
+  answer: number;
   winningSlotKey: string | null;
 }
 
@@ -57,9 +60,14 @@ export default function RfRoom({ roomCode }: { roomCode: string }) {
   const isHost = storedHost || claimedHost;
   const [starting, setStarting] = useState(false);
 
-  const [questionState, setQuestionState] = useState<QuestionState | null>(null);
-  // Keyed by round so a round change can't leave a previous round's guess or
-  // bets on screen, without an effect reaching in to reset them.
+  // All keyed by round. The reveal data especially: the status flips over
+  // realtime the instant the server writes it, but the answer behind it is a
+  // fetch away. Keyed like this, the payout screen simply has nothing to
+  // draw until its own round's numbers land, instead of briefly drawing the
+  // previous round's (which showed a loss where there was a win).
+  const [totalRounds, setTotalRounds] = useState<number | null>(null);
+  const [questionByRound, setQuestionByRound] = useState<Record<number, RoundQuestion>>({});
+  const [revealByRound, setRevealByRound] = useState<Record<number, RoundReveal>>({});
   const [guessByRound, setGuessByRound] = useState<Record<number, number>>({});
   const [betsByRound, setBetsByRound] = useState<Record<number, RfBet[]>>({});
 
@@ -140,7 +148,14 @@ export default function RfRoom({ roomCode }: { roomCode: string }) {
         { event: "*", schema: "public", table: "rf_players", filter: `room_id=eq.${roomId}` },
         refreshPlayers
       )
-      .subscribe();
+      .subscribe((status) => {
+        // Subscribing takes a moment, and nothing that happens in that
+        // window is ever delivered. Someone joining right after the page
+        // loads -- the host typing a nickname straight away, say -- would
+        // otherwise stay invisible until the next unrelated event, leaving
+        // the lobby empty and the start button disabled.
+        if (status === "SUBSCRIBED") fetchPlayers();
+      });
 
     return () => {
       supabase.removeChannel(channel);
@@ -155,11 +170,27 @@ export default function RfRoom({ roomCode }: { roomCode: string }) {
     if (loadedQuestionKeyRef.current === key) return;
     loadedQuestionKeyRef.current = key;
 
+    const round = room.current_round;
     let cancelled = false;
     fetch(`/api/rf/rooms/${roomCode}/state`)
       .then((res) => res.json())
       .then((data) => {
-        if (!cancelled) setQuestionState(data);
+        if (cancelled) return;
+        if (typeof data.totalRounds === "number") setTotalRounds(data.totalRounds);
+        if (data.question) {
+          setQuestionByRound((prev) => ({
+            ...prev,
+            [round]: { text: data.question.text, unit: data.question.unit },
+          }));
+        }
+        // Only present once the room is actually revealing; storing it under
+        // the round means it can never be read against a different one.
+        if (typeof data.answer === "number") {
+          setRevealByRound((prev) => ({
+            ...prev,
+            [round]: { answer: data.answer, winningSlotKey: data.winningSlotKey },
+          }));
+        }
       });
     return () => {
       cancelled = true;
@@ -310,8 +341,8 @@ export default function RfRoom({ roomCode }: { roomCode: string }) {
 
   const round = room.current_round;
   const slots = (room.slots ?? []) as Slot[];
-  const question = questionState?.question;
-  const roundLabel = `Runda ${round + 1} / ${questionState?.totalRounds ?? "?"}`;
+  const question = questionByRound[round];
+  const roundLabel = `Runda ${round + 1} / ${totalRounds ?? "?"}`;
   const myBets = betsByRound[round] ?? [];
 
   if (room.status === "lobby") {
@@ -384,8 +415,12 @@ export default function RfRoom({ roomCode }: { roomCode: string }) {
   }
 
   if (room.status === "reveal") {
-    const answer = questionState?.answer ?? null;
-    const winningKey = questionState?.winningSlotKey ?? null;
+    const reveal = revealByRound[round];
+    // The status arrives before the numbers do; showing a payout computed
+    // without them would flash the wrong figure.
+    if (!reveal) return <Centered title="Chwila…" message="Liczę wypłaty 💰" />;
+
+    const winningKey = reveal.winningSlotKey;
     const winningSlot = slots.find((s) => s.key === winningKey);
     const iAuthored = !!winningSlot?.authorIds.includes(me.id);
     const delta =
@@ -403,7 +438,7 @@ export default function RfRoom({ roomCode }: { roomCode: string }) {
         <p className="px-1 text-sm font-bold leading-snug text-white/60">{question?.text}</p>
         <p className="text-sm font-bold text-white/50">Prawidłowa odpowiedź</p>
         <p className={`text-5xl font-black ${gradientText}`}>
-          {answer !== null ? answer.toLocaleString("pl") : "—"}
+          {reveal.answer.toLocaleString("pl")}
           {question?.unit ? <span className="text-2xl"> {question.unit}</span> : null}
         </p>
         <p className="text-sm font-bold text-white/60">
