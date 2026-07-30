@@ -1,8 +1,11 @@
 # Quizownia
 
-Aplikacja typu "live quiz" (na wzór Kahoot). Host tworzy quiz na podstawie promptu (pytania generuje AI), gracze dołączają telefonami przez kod pokoju / QR i odpowiadają na czas.
+Dwie imprezowe gry na telefony, wspólny mechanizm: prowadzący pokazuje kod QR, reszta wbija swoimi telefonami, wszystko synchronizuje się na żywo.
 
-Stack: Next.js (App Router, TypeScript) + Tailwind CSS + Supabase (Postgres + Realtime) + Anthropic API (`claude-haiku-4-5`) do generowania pytań, wdrażane na Vercel.
+- **Quizownia** (`/`) — live quiz na wzór Kahoota. Host podaje temat, pytania generują się z promptu, gracze odpowiadają ABCD na czas.
+- **Ryzyk Fizyk** (`/rf`) — polska wersja *Wits & Wagers*. Pytania z odpowiedzią liczbową: każdy wpisuje swój typ, typy trafiają na matę posortowane rosnąco, a potem wszyscy obstawiają, który jest najbliżej — **nie przekraczając** prawidłowej wartości. Pytania są stałą pulą w kodzie ([`lib/ryzykfizyk/questions.ts`](lib/ryzykfizyk/questions.ts)), nie generują się.
+
+Stack: Next.js (App Router, TypeScript) + Tailwind CSS + Supabase (Postgres + Realtime) + Anthropic API (`claude-haiku-4-5`) do generowania pytań quizu, wdrażane na Vercel.
 
 ## 1. Zmienne środowiskowe
 
@@ -36,7 +39,9 @@ cp .env.local.example .env.local
 
    Migracje są bezpieczne do ponownego uruchomienia. Bez `0002` aplikacja nadal w pełni działa: gracze dołączają normalnie, tylko sekcja „Ranking wszech czasów" na stronie głównej się nie pokazuje.
 
-5. Sprawdź w **Database → Replication**, że tabele `rooms`, `players`, `answers` są dodane do publikacji `supabase_realtime` (migracja robi to automatycznie).
+5. Wklej i uruchom [`supabase/migrations/0003_ryzyk_fizyk.sql`](supabase/migrations/0003_ryzyk_fizyk.sql) — tabele drugiej gry (`rf_*`). Bez niej Quizownia działa normalnie, a Ryzyk Fizyk mówi wprost, że brakuje migracji.
+
+6. Sprawdź w **Database → Replication**, że tabele `rooms`, `players`, `answers` oraz `rf_*` są dodane do publikacji `supabase_realtime` (migracje robią to automatycznie).
 
 ## 3. Uruchomienie lokalne
 
