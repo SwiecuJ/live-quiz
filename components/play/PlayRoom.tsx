@@ -23,6 +23,11 @@ interface MyAnswer {
 }
 
 const REFRESH_DEBOUNCE_MS = 200;
+// How long a freshly-arrived round result stays on screen before yielding
+// to whatever the live room state has since moved on to. Without this, a
+// round result that finishes loading right as the host auto-advances would
+// otherwise get skipped entirely -- see the resultToShow comment below.
+const RESULT_DISPLAY_MS = 7000;
 
 function storageKey(roomCode: string) {
   return `live-quiz-player-${roomCode}`;
@@ -49,6 +54,17 @@ export default function PlayRoom({ roomCode }: { roomCode: string }) {
   const [answering, setAnswering] = useState(false);
   const [answerError, setAnswerError] = useState<string | null>(null);
   const [resultRevealedAt, setResultRevealedAt] = useState<string | null>(null);
+
+  // The round result to actually display right now, independent of what
+  // room.status has moved on to. Set the moment reveal data for a round
+  // arrives and cleared after RESULT_DISPLAY_MS -- so a round the host
+  // advances past quickly still gets shown to this player for a beat
+  // instead of being skipped entirely.
+  const [resultToShow, setResultToShow] = useState<{
+    question: QuestionPayload;
+    myAnswer: MyAnswer;
+  } | null>(null);
+  const resultToShowTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadedQuestionKeyRef = useRef<string | null>(null);
   const loadedResultKeyRef = useRef<string | null>(null);
@@ -161,6 +177,11 @@ export default function PlayRoom({ roomCode }: { roomCode: string }) {
   // Fetch the revealed answer + own score once the round ends. One request
   // (not two sequential ones) -- see the route's own comment for why that
   // matters on a slow connection.
+  //
+  // Deliberately no cancellation guard here: unlike the question-fetch
+  // effect above, a "late" response here is still exactly what we want to
+  // show (see resultToShow) even if the host has since auto-advanced past
+  // it -- guarding it out was the bug, not the fix.
   useEffect(() => {
     if (!room || room.status !== "round_result" || !player) return;
     const key = `${room.status}-${room.current_question_index}`;
@@ -168,29 +189,31 @@ export default function PlayRoom({ roomCode }: { roomCode: string }) {
     loadedResultKeyRef.current = key;
     setResultRevealedAt(new Date().toISOString());
 
-    let cancelled = false;
     fetch(
       `/api/rooms/${roomCode}/question?reveal=1&index=${room.current_question_index}&playerId=${player.id}`
     )
       .then((res) => res.json())
       .then((data) => {
-        if (cancelled) return;
-        setQuestion(data.question);
-        setTotalQuestions(data.totalQuestions);
+        const revealedAnswer: MyAnswer = {
+          selectedIndex: data.yourAnswer?.selected_index ?? -1,
+          points: data.yourAnswer?.points_awarded ?? 0,
+        };
         // Keyed by question_id, so this can never clobber a different
         // round's entry even if it arrives late.
-        setMyAnswers((prev) => ({
-          ...prev,
-          [data.question.id]: {
-            selectedIndex: data.yourAnswer?.selected_index ?? -1,
-            points: data.yourAnswer?.points_awarded ?? 0,
-          },
-        }));
+        setMyAnswers((prev) => ({ ...prev, [data.question.id]: revealedAnswer }));
+
+        setResultToShow({ question: data.question, myAnswer: revealedAnswer });
+        if (resultToShowTimeoutRef.current) clearTimeout(resultToShowTimeoutRef.current);
+        resultToShowTimeoutRef.current = setTimeout(() => setResultToShow(null), RESULT_DISPLAY_MS);
       });
-    return () => {
-      cancelled = true;
-    };
   }, [room, roomCode, player]);
+
+  // Clear any pending "hide the buffered result" timeout on unmount.
+  useEffect(() => {
+    return () => {
+      if (resultToShowTimeoutRef.current) clearTimeout(resultToShowTimeoutRef.current);
+    };
+  }, []);
 
   const { remainingSeconds, fraction } = useCountdown(
     room?.status === "in_progress" ? room.question_start_at : null,
@@ -289,6 +312,29 @@ export default function PlayRoom({ roomCode }: { roomCode: string }) {
     );
   }
 
+  // A buffered round result takes priority over whatever room.status has
+  // moved on to in the meantime -- that's the whole point (see the
+  // resultToShow state comment above).
+  if (resultToShow) {
+    const rank = players.findIndex((p) => p.id === player.id) + 1;
+    const answered = resultToShow.myAnswer.selectedIndex >= 0;
+    const isCorrect =
+      answered && resultToShow.myAnswer.selectedIndex === resultToShow.question.correct_index;
+    return (
+      <RoundResultView
+        question={resultToShow.question}
+        selectedIndex={answered ? resultToShow.myAnswer.selectedIndex : null}
+        isCorrect={isCorrect}
+        answered={answered}
+        points={resultToShow.myAnswer.points ?? 0}
+        totalScore={players.find((p) => p.id === player.id)?.total_score ?? player.total_score}
+        rank={rank || null}
+        totalPlayers={players.length}
+        nextInSeconds={nextCountdown.remainingSeconds}
+      />
+    );
+  }
+
   // Guard against a stale `question` from the previous round while the new
   // one is still loading -- otherwise a fast tap can insert an answer
   // against the wrong question_id, which then shows up as "no answer".
@@ -314,30 +360,8 @@ export default function PlayRoom({ roomCode }: { roomCode: string }) {
     );
   }
 
-  const roundResultReady =
-    question && currentQuestionReady && question.correct_index !== undefined && myAnswer;
-
-  if (room.status === "round_result" && !roundResultReady) {
+  if (room.status === "round_result") {
     return <CenteredMessage title="Chwila…" message="Sprawdzam Twoją odpowiedź." />;
-  }
-
-  if (room.status === "round_result" && question && roundResultReady) {
-    const rank = players.findIndex((p) => p.id === player.id) + 1;
-    const answered = myAnswer!.selectedIndex >= 0;
-    const isCorrect = answered && myAnswer!.selectedIndex === question.correct_index;
-    return (
-      <RoundResultView
-        question={question}
-        selectedIndex={answered ? myAnswer!.selectedIndex : null}
-        isCorrect={isCorrect}
-        answered={answered}
-        points={myAnswer!.points ?? 0}
-        totalScore={players.find((p) => p.id === player.id)?.total_score ?? player.total_score}
-        rank={rank || null}
-        totalPlayers={players.length}
-        nextInSeconds={nextCountdown.remainingSeconds}
-      />
-    );
   }
 
   if (room.status === "finished") {

@@ -26,6 +26,21 @@ interface AnswerRow {
   points_awarded: number;
 }
 
+interface SummaryQuestion {
+  id: string;
+  question_text: string;
+  options: string[];
+  correct_index: number;
+  order_index: number;
+}
+
+interface SummaryAnswer {
+  player_id: string;
+  question_id: string;
+  selected_index: number;
+  points_awarded: number;
+}
+
 const REFRESH_DEBOUNCE_MS = 200;
 
 export default function HostRoom({ roomCode }: { roomCode: string }) {
@@ -48,6 +63,10 @@ export default function HostRoom({ roomCode }: { roomCode: string }) {
   const [starting, setStarting] = useState(false);
   const [advancing, setAdvancing] = useState(false);
   const [resultRevealedAt, setResultRevealedAt] = useState<string | null>(null);
+  const [summary, setSummary] = useState<{
+    questions: SummaryQuestion[];
+    answers: SummaryAnswer[];
+  } | null>(null);
 
   const endedRoundKeyRef = useRef<string | null>(null);
   const loadedQuestionKeyRef = useRef<string | null>(null);
@@ -182,6 +201,14 @@ export default function HostRoom({ roomCode }: { roomCode: string }) {
     };
   }, [room, roomCode]);
 
+  // Fetch the full game recap once it's over.
+  useEffect(() => {
+    if (!room || room.status !== "finished" || summary) return;
+    fetch(`/api/rooms/${roomCode}/summary`)
+      .then((res) => res.json())
+      .then((data) => setSummary({ questions: data.questions, answers: data.answers }));
+  }, [room, roomCode, summary]);
+
   const { remainingSeconds, fraction, isDone } = useCountdown(
     room?.status === "in_progress" ? room.question_start_at : null,
     room?.round_time_seconds ?? 20
@@ -299,7 +326,7 @@ export default function HostRoom({ roomCode }: { roomCode: string }) {
         />
       )}
 
-      {room.status === "finished" && <FinalView players={players} />}
+      {room.status === "finished" && <FinalView players={players} summary={summary} />}
     </div>
   );
 }
@@ -534,10 +561,17 @@ function RoundResultView({
   );
 }
 
-function FinalView({ players }: { players: Player[] }) {
+function FinalView({
+  players,
+  summary,
+}: {
+  players: Player[];
+  summary: { questions: SummaryQuestion[]; answers: SummaryAnswer[] } | null;
+}) {
   const router = useRouter();
   const podium = players.slice(0, 3);
   const medals = ["🥇", "🥈", "🥉"];
+  const playerById = new Map(players.map((p) => [p.id, p]));
 
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-10 py-6">
@@ -576,6 +610,48 @@ function FinalView({ players }: { players: Player[] }) {
           ))}
         </ol>
       </div>
+
+      {summary && (
+        <div className={`w-full max-w-3xl p-4 ${card}`}>
+          <p className="mb-4 text-lg font-black">Podsumowanie pytań 📋</p>
+          <div className="flex max-h-[50vh] flex-col gap-4 overflow-y-auto pr-1">
+            {summary.questions.map((q) => {
+              const top3 = summary.answers
+                .filter((a) => a.question_id === q.id)
+                .sort((a, b) => b.points_awarded - a.points_awarded)
+                .slice(0, 3);
+              return (
+                <div
+                  key={q.id}
+                  className="rounded-xl border border-white/10 bg-white/5 p-3 text-left"
+                >
+                  <p className="font-bold">
+                    {q.order_index + 1}. {q.question_text}
+                  </p>
+                  <p className="mt-1 text-sm text-emerald-300">✓ {q.options[q.correct_index]}</p>
+                  <ol className="mt-2 flex flex-col gap-1">
+                    {top3.map((a, i) => (
+                      <li
+                        key={a.player_id}
+                        className="flex justify-between text-sm text-white/80"
+                      >
+                        <span>
+                          {i + 1}. {avatarFor(a.player_id)}{" "}
+                          {playerById.get(a.player_id)?.nickname ?? "?"}
+                        </span>
+                        <span className="font-bold">+{a.points_awarded}</span>
+                      </li>
+                    ))}
+                    {top3.length === 0 && (
+                      <li className="text-sm text-white/40">Nikt nie odpowiedział 🦗</li>
+                    )}
+                  </ol>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <button onClick={() => router.push("/")} className={primaryButton + " text-lg"}>
         Nowy quiz 🔁
