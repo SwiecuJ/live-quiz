@@ -1,12 +1,20 @@
 "use client";
 
-import { useState, FormEvent } from "react";
+import { useEffect, useState, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { card, gradientText, primaryButton, inputBase } from "@/lib/theme";
 import { markAsHost } from "@/lib/hostStorage";
+import { avatarFor } from "@/lib/avatar";
 
 const ROUND_OPTIONS = [5, 10, 15] as const;
+const MEDALS = ["🥇", "🥈", "🥉"];
 type HostMode = "screen" | "phone";
+
+interface Leader {
+  nickname: string;
+  total_score: number;
+  games_played: number;
+}
 
 export default function Home() {
   const router = useRouter();
@@ -19,6 +27,23 @@ export default function Home() {
 
   const [joinCode, setJoinCode] = useState("");
   const [joinError, setJoinError] = useState<string | null>(null);
+
+  const [leaders, setLeaders] = useState<Leader[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/leaderboard")
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled) setLeaders(data.leaders ?? []);
+      })
+      .catch(() => {
+        // Nothing to show is a fine outcome here -- the section just stays hidden.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function handleCreate(e: FormEvent) {
     e.preventDefault();
@@ -134,7 +159,7 @@ export default function Home() {
           {createError && <p className="text-sm font-semibold text-rose-400">{createError}</p>}
 
           <button type="submit" disabled={creating} className={`mt-2 ${primaryButton}`}>
-            {creating ? "Kuma temat…" : "Odpalamy! 🚀"}
+            {creating ? "Wymyślam pytania…" : "Odpalamy! 🚀"}
           </button>
         </form>
 
@@ -160,6 +185,34 @@ export default function Home() {
           </button>
         </form>
       </div>
+
+      {leaders.length > 0 && (
+        <div className={`mt-6 w-full max-w-3xl p-6 ${card}`}>
+          <h2 className="mb-1 text-xl font-black text-white">Ranking wszech czasów 👑</h2>
+          <p className="mb-4 text-xs font-medium text-white/40">
+            Punkty ze wszystkich rozegranych gier.
+          </p>
+          <ol className="flex flex-col gap-2">
+            {leaders.map((l, i) => (
+              <li
+                key={`${l.nickname}-${i}`}
+                className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2"
+              >
+                <span className="w-7 shrink-0 text-center text-base font-black">
+                  {MEDALS[i] ?? `${i + 1}.`}
+                </span>
+                <span className="flex-1 truncate font-bold text-white/90">
+                  {avatarFor(l.nickname)} {l.nickname}
+                </span>
+                <span className="shrink-0 text-xs text-white/40">
+                  {l.games_played} {l.games_played === 1 ? "gra" : "gier"}
+                </span>
+                <span className={`shrink-0 font-black ${gradientText}`}>{l.total_score}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
     </div>
   );
 }

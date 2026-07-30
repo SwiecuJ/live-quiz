@@ -32,7 +32,11 @@ cp .env.local.example .env.local
    supabase db push
    ```
 
-4. Sprawdź w **Database → Replication**, że tabele `rooms`, `players`, `answers` są dodane do publikacji `supabase_realtime` (migracja robi to automatycznie).
+4. Wklej i uruchom w ten sam sposób [`supabase/migrations/0002_device_identity.sql`](supabase/migrations/0002_device_identity.sql) — dodaje trwałą tożsamość urządzenia i widok `global_scores` pod ranking wszech czasów.
+
+   Migracje są bezpieczne do ponownego uruchomienia. Bez `0002` aplikacja nadal w pełni działa: gracze dołączają normalnie, tylko sekcja „Ranking wszech czasów" na stronie głównej się nie pokazuje.
+
+5. Sprawdź w **Database → Replication**, że tabele `rooms`, `players`, `answers` są dodane do publikacji `supabase_realtime` (migracja robi to automatycznie).
 
 ## 3. Uruchomienie lokalne
 

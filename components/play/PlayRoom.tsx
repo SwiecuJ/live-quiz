@@ -9,6 +9,7 @@ import { ANSWER_STYLES } from "@/lib/answerStyles";
 import { avatarFor } from "@/lib/avatar";
 import { card, gradientText, primaryButton, inputBase } from "@/lib/theme";
 import { isMarkedHost, markAsHost } from "@/lib/hostStorage";
+import { getDeviceId, getSavedNickname, saveNickname } from "@/lib/identity";
 import type { Player, Room } from "@/lib/types";
 
 interface QuestionPayload {
@@ -47,7 +48,13 @@ export default function PlayRoom({ roomCode }: { roomCode: string }) {
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [player, setPlayer] = useState<Player | null>(null);
-  const [nickname, setNickname] = useState("");
+  // Falls back to the nickname this device used last time, so a returning
+  // player just taps through. Read via the store (not an initial useState
+  // value) because localStorage doesn't exist during the server render;
+  // `typedNickname` stays null until they actually edit it.
+  const savedNickname = useSyncExternalStore(noopSubscribe, getSavedNickname, () => "");
+  const [typedNickname, setTypedNickname] = useState<string | null>(null);
+  const nickname = typedNickname ?? savedNickname;
   const [joining, setJoining] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
 
@@ -257,11 +264,24 @@ export default function PlayRoom({ roomCode }: { roomCode: string }) {
     setJoining(true);
     setJoinError(null);
 
-    const { data, error } = await supabase
+    const trimmed = nickname.trim().slice(0, 20);
+    let { data, error } = await supabase
       .from("players")
-      .insert({ room_id: room.id, nickname: nickname.trim().slice(0, 20) })
+      .insert({ room_id: room.id, nickname: trimmed, device_id: getDeviceId() })
       .select()
       .single();
+
+    // If the 0002 migration hasn't been applied yet there's no device_id
+    // column, and rejecting the join over that would lock everyone out of
+    // the game. Fall back to joining without the identity -- they play
+    // normally, they just don't accrue an all-time score.
+    if (error && (error.code === "PGRST204" || error.code === "42703")) {
+      ({ data, error } = await supabase
+        .from("players")
+        .insert({ room_id: room.id, nickname: trimmed })
+        .select()
+        .single());
+    }
 
     setJoining(false);
 
@@ -270,6 +290,7 @@ export default function PlayRoom({ roomCode }: { roomCode: string }) {
       return;
     }
 
+    saveNickname(trimmed);
     localStorage.setItem(storageKey(roomCode), data.id);
     setPlayer(data as Player);
   }
@@ -332,7 +353,7 @@ export default function PlayRoom({ roomCode }: { roomCode: string }) {
         roomCode={roomCode}
         isHost={isHost}
         nickname={nickname}
-        setNickname={setNickname}
+        setNickname={setTypedNickname}
         joining={joining}
         joinError={joinError}
         onJoin={handleJoin}
@@ -688,7 +709,10 @@ function RoundResultView({
       </h1>
       <p className={`text-xl font-black ${gradientText}`}>+{points} pkt</p>
 
-      <div className="grid w-full max-w-sm grid-cols-1 gap-2">
+      {/* Same 2x2 arrangement, tile shape and colour order as the answering
+          screen, so each option stays exactly where it was a second ago and
+          the eye can go straight to the one it tapped. */}
+      <div className="grid w-full max-w-sm grid-cols-2 gap-3">
         {question.options.map((opt, i) => {
           const style = ANSWER_STYLES[i];
           const isRightAnswer = i === question.correct_index;
@@ -696,7 +720,7 @@ function RoundResultView({
           return (
             <div
               key={i}
-              className={`flex items-center gap-3 rounded-xl border-2 px-4 py-3 text-left text-sm font-black ${
+              className={`flex min-h-[110px] flex-col items-center justify-center gap-2 break-words rounded-2xl border-2 px-2 py-3 text-center text-sm font-black leading-tight ${
                 isRightAnswer
                   ? `border-black text-black ${style.bg} ${style.shadow}`
                   : wasPicked
@@ -704,12 +728,12 @@ function RoundResultView({
                     : "border-white/10 bg-white/5 text-white/40"
               }`}
             >
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 border-black bg-white text-base">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 border-black bg-white text-xl">
                 {style.icon}
               </span>
-              <span className="flex-1">{opt}</span>
-              {isRightAnswer && <span>✓ To ta!</span>}
-              {wasPicked && !isRightAnswer && <span>👈 Ty</span>}
+              <span>{opt}</span>
+              {isRightAnswer && <span className="text-xs">✓ To ta!</span>}
+              {wasPicked && !isRightAnswer && <span className="text-xs">👈 Twoja</span>}
             </div>
           );
         })}
