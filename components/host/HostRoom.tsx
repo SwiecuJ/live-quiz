@@ -8,6 +8,7 @@ import { useCountdown } from "@/lib/useCountdown";
 import { ANSWER_STYLES } from "@/lib/answerStyles";
 import { avatarFor } from "@/lib/avatar";
 import { card, gradientText, primaryButton } from "@/lib/theme";
+import { NEXT_QUESTION_DELAY_SECONDS } from "@/lib/constants";
 import type { Player, Room } from "@/lib/types";
 
 interface QuestionPayload {
@@ -25,7 +26,6 @@ interface AnswerRow {
   points_awarded: number;
 }
 
-const NEXT_QUESTION_DELAY_SECONDS = 6;
 const REFRESH_DEBOUNCE_MS = 200;
 
 export default function HostRoom({ roomCode }: { roomCode: string }) {

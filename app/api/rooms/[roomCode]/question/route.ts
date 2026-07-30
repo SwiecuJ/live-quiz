@@ -21,6 +21,13 @@ export const runtime = "nodejs";
  * which surfaced as answers looking up the wrong question_id and getting
  * shown as "no answer". Falls back to the room's current index only when
  * `index` is omitted.
+ *
+ * `?playerId=<id>` (only meaningful together with `?reveal=1`) folds the
+ * caller's own answer for this question into the same response as
+ * `yourAnswer`, saving a second sequential round trip. That second request
+ * was exactly the kind of thing that, on a slow connection, could still be
+ * in flight when the round moved on -- shrinking the reveal fetch to one
+ * request cuts that window roughly in half.
  */
 export async function GET(
   req: NextRequest,
@@ -29,6 +36,7 @@ export async function GET(
   const { roomCode } = await params;
   const reveal = req.nextUrl.searchParams.get("reveal") === "1";
   const indexParam = req.nextUrl.searchParams.get("index");
+  const playerId = req.nextUrl.searchParams.get("playerId");
 
   const supabase = createServiceRoleClient();
 
@@ -67,10 +75,22 @@ export async function GET(
     .select("id", { count: "exact", head: true })
     .eq("quiz_id", room.quiz_id);
 
+  let yourAnswer: { selected_index: number; points_awarded: number } | null = null;
+  if (reveal && playerId) {
+    const { data: answer } = await supabase
+      .from("answers")
+      .select("selected_index, points_awarded")
+      .eq("player_id", playerId)
+      .eq("question_id", (question as unknown as { id: string }).id)
+      .maybeSingle();
+    yourAnswer = answer ?? null;
+  }
+
   return NextResponse.json({
     question,
     totalQuestions: count ?? 0,
     questionStartAt: room.question_start_at,
     roundTimeSeconds: room.round_time_seconds,
+    yourAnswer,
   });
 }

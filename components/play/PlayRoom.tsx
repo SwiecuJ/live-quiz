@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState, FormEvent } from "react";
-import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 import { useCountdown } from "@/lib/useCountdown";
 import { ANSWER_STYLES } from "@/lib/answerStyles";
 import { avatarFor } from "@/lib/avatar";
 import { card, gradientText, primaryButton, inputBase } from "@/lib/theme";
+import { NEXT_QUESTION_DELAY_SECONDS } from "@/lib/constants";
 import type { Player, Room } from "@/lib/types";
 
 interface QuestionPayload {
@@ -15,6 +15,11 @@ interface QuestionPayload {
   options: string[];
   order_index: number;
   correct_index?: number;
+}
+
+interface MyAnswer {
+  selectedIndex: number;
+  points: number | null;
 }
 
 const REFRESH_DEBOUNCE_MS = 200;
@@ -36,10 +41,14 @@ export default function PlayRoom({ roomCode }: { roomCode: string }) {
   const [question, setQuestion] = useState<QuestionPayload | null>(null);
   const [totalQuestions, setTotalQuestions] = useState(0);
 
-  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  // Keyed by question_id rather than reset-per-round: a round transition
+  // can't corrupt a previous round's entry, and a late-arriving reveal
+  // response can't overwrite the wrong round's answer either. Same fix as
+  // HostRoom's answered-count tracking, applied to "what did *I* pick".
+  const [myAnswers, setMyAnswers] = useState<Record<string, MyAnswer>>({});
   const [answering, setAnswering] = useState(false);
-  const [ownPoints, setOwnPoints] = useState<number | null>(null);
   const [answerError, setAnswerError] = useState<string | null>(null);
+  const [resultRevealedAt, setResultRevealedAt] = useState<string | null>(null);
 
   const loadedQuestionKeyRef = useRef<string | null>(null);
   const loadedResultKeyRef = useRef<string | null>(null);
@@ -124,7 +133,7 @@ export default function PlayRoom({ roomCode }: { roomCode: string }) {
     };
   }, [room?.id]);
 
-  // Fetch the question when a new round starts, and reset the local answer state.
+  // Fetch the question when a new round starts.
   useEffect(() => {
     if (!room || room.status !== "in_progress") return;
     const key = `${room.status}-${room.current_question_index}`;
@@ -133,8 +142,6 @@ export default function PlayRoom({ roomCode }: { roomCode: string }) {
 
     let cancelled = false;
     setQuestion(null);
-    setSelectedIndex(null);
-    setOwnPoints(null);
     setAnswerError(null);
     fetch(`/api/rooms/${roomCode}/question?index=${room.current_question_index}`)
       .then((res) => res.json())
@@ -151,37 +158,34 @@ export default function PlayRoom({ roomCode }: { roomCode: string }) {
     };
   }, [room, roomCode]);
 
-  // Fetch the revealed answer + own score once the round ends.
+  // Fetch the revealed answer + own score once the round ends. One request
+  // (not two sequential ones) -- see the route's own comment for why that
+  // matters on a slow connection.
   useEffect(() => {
     if (!room || room.status !== "round_result" || !player) return;
     const key = `${room.status}-${room.current_question_index}`;
     if (loadedResultKeyRef.current === key) return;
     loadedResultKeyRef.current = key;
+    setResultRevealedAt(new Date().toISOString());
 
     let cancelled = false;
-    fetch(`/api/rooms/${roomCode}/question?reveal=1&index=${room.current_question_index}`)
+    fetch(
+      `/api/rooms/${roomCode}/question?reveal=1&index=${room.current_question_index}&playerId=${player.id}`
+    )
       .then((res) => res.json())
       .then((data) => {
-        if (cancelled) return data;
+        if (cancelled) return;
         setQuestion(data.question);
         setTotalQuestions(data.totalQuestions);
-        return supabase
-          .from("answers")
-          .select("selected_index, points_awarded")
-          .eq("player_id", player.id)
-          .eq("question_id", data.question.id)
-          .maybeSingle();
-      })
-      .then((res) => {
-        // Same staleness guard: if the player already moved on to the next
-        // round, this would otherwise overwrite the fresh round's
-        // selectedIndex with the PREVIOUS round's answer, making an
-        // unanswered question look already-answered.
-        if (cancelled) return;
-        if (res && "data" in res) {
-          setSelectedIndex(res.data?.selected_index ?? null);
-          setOwnPoints(res.data?.points_awarded ?? 0);
-        }
+        // Keyed by question_id, so this can never clobber a different
+        // round's entry even if it arrives late.
+        setMyAnswers((prev) => ({
+          ...prev,
+          [data.question.id]: {
+            selectedIndex: data.yourAnswer?.selected_index ?? -1,
+            points: data.yourAnswer?.points_awarded ?? 0,
+          },
+        }));
       });
     return () => {
       cancelled = true;
@@ -191,6 +195,11 @@ export default function PlayRoom({ roomCode }: { roomCode: string }) {
   const { remainingSeconds, fraction } = useCountdown(
     room?.status === "in_progress" ? room.question_start_at : null,
     room?.round_time_seconds ?? 20
+  );
+
+  const nextCountdown = useCountdown(
+    room?.status === "round_result" ? resultRevealedAt : null,
+    NEXT_QUESTION_DELAY_SECONDS
   );
 
   async function handleJoin(e: FormEvent) {
@@ -218,14 +227,15 @@ export default function PlayRoom({ roomCode }: { roomCode: string }) {
   }
 
   async function handleAnswer(index: number) {
-    if (!player || !question || answering || selectedIndex !== null) return;
+    if (!player || !question || answering || myAnswers[question.id]) return;
     setAnswering(true);
-    setSelectedIndex(index);
     setAnswerError(null);
+    const questionId = question.id;
+    setMyAnswers((prev) => ({ ...prev, [questionId]: { selectedIndex: index, points: null } }));
 
     const { error } = await supabase.from("answers").insert({
       player_id: player.id,
-      question_id: question.id,
+      question_id: questionId,
       room_id: room!.id,
       selected_index: index,
     });
@@ -241,7 +251,11 @@ export default function PlayRoom({ roomCode }: { roomCode: string }) {
       // A genuine failure (network blip etc.) -- nothing was recorded, so
       // unlock the UI and let them tap again instead of silently stranding
       // them in a "locked but never actually answered" state.
-      setSelectedIndex(null);
+      setMyAnswers((prev) => {
+        const next = { ...prev };
+        delete next[questionId];
+        return next;
+      });
       setAnswerError("Nie wysłało się, spróbuj jeszcze raz 😬");
     }
   }
@@ -279,6 +293,7 @@ export default function PlayRoom({ roomCode }: { roomCode: string }) {
   // one is still loading -- otherwise a fast tap can insert an answer
   // against the wrong question_id, which then shows up as "no answer".
   const currentQuestionReady = question?.order_index === room.current_question_index;
+  const myAnswer = question ? myAnswers[question.id] : undefined;
 
   if (room.status === "in_progress" && !currentQuestionReady) {
     return <CenteredMessage title="Chwila…" message="Ładuję kolejne pytanie." />;
@@ -292,30 +307,35 @@ export default function PlayRoom({ roomCode }: { roomCode: string }) {
         totalQuestions={totalQuestions}
         remainingSeconds={remainingSeconds}
         fraction={fraction}
-        selectedIndex={selectedIndex}
+        selectedIndex={myAnswer?.selectedIndex ?? null}
         answerError={answerError}
         onAnswer={handleAnswer}
       />
     );
   }
 
-  if (room.status === "round_result" && question && question.correct_index === undefined) {
+  const roundResultReady =
+    question && currentQuestionReady && question.correct_index !== undefined && myAnswer;
+
+  if (room.status === "round_result" && !roundResultReady) {
     return <CenteredMessage title="Chwila…" message="Sprawdzam Twoją odpowiedź." />;
   }
 
-  if (room.status === "round_result" && question && question.correct_index !== undefined) {
+  if (room.status === "round_result" && question && roundResultReady) {
     const rank = players.findIndex((p) => p.id === player.id) + 1;
-    const isCorrect = selectedIndex !== null && selectedIndex === question.correct_index;
+    const answered = myAnswer!.selectedIndex >= 0;
+    const isCorrect = answered && myAnswer!.selectedIndex === question.correct_index;
     return (
       <RoundResultView
         question={question}
-        selectedIndex={selectedIndex}
+        selectedIndex={answered ? myAnswer!.selectedIndex : null}
         isCorrect={isCorrect}
-        answered={selectedIndex !== null}
-        points={ownPoints ?? 0}
+        answered={answered}
+        points={myAnswer!.points ?? 0}
         totalScore={players.find((p) => p.id === player.id)?.total_score ?? player.total_score}
         rank={rank || null}
         totalPlayers={players.length}
+        nextInSeconds={nextCountdown.remainingSeconds}
       />
     );
   }
@@ -471,6 +491,7 @@ function RoundResultView({
   totalScore,
   rank,
   totalPlayers,
+  nextInSeconds,
 }: {
   question: QuestionPayload;
   selectedIndex: number | null;
@@ -480,6 +501,7 @@ function RoundResultView({
   totalScore: number;
   rank: number | null;
   totalPlayers: number;
+  nextInSeconds: number;
 }) {
   return (
     <div className="flex flex-1 flex-col items-center gap-4 p-4 text-center text-white">
@@ -497,17 +519,19 @@ function RoundResultView({
           return (
             <div
               key={i}
-              className={`flex items-center gap-3 rounded-xl border-2 border-black px-4 py-3 text-left text-sm font-black ${
+              className={`flex items-center gap-3 rounded-xl border-2 px-4 py-3 text-left text-sm font-black ${
                 isRightAnswer
-                  ? `text-black ${style.bg} ${style.shadow}`
-                  : "border-white/10 bg-white/5 text-white/40"
+                  ? `border-black text-black ${style.bg} ${style.shadow}`
+                  : wasPicked
+                    ? "border-rose-400 bg-rose-400/20 text-rose-200"
+                    : "border-white/10 bg-white/5 text-white/40"
               }`}
             >
               <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 border-black bg-white text-base">
                 {style.icon}
               </span>
               <span className="flex-1">{opt}</span>
-              {isRightAnswer && <span>✓</span>}
+              {isRightAnswer && <span>✓ To ta!</span>}
               {wasPicked && !isRightAnswer && <span>👈 Ty</span>}
             </div>
           );
@@ -524,6 +548,8 @@ function RoundResultView({
           </p>
         )}
       </div>
+
+      <p className="text-sm text-white/40">Kolejne pytanie za {Math.max(0, nextInSeconds)}s ⏱️</p>
     </div>
   );
 }
@@ -539,8 +565,6 @@ function FinalView({
   rank: number | null;
   totalScore: number;
 }) {
-  const router = useRouter();
-
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-4 p-6 text-center text-white">
       <p className="text-6xl">🏁</p>
@@ -552,9 +576,7 @@ function FinalView({
       <p className="text-lg">
         Ostateczny wynik: <span className="font-black">{totalScore}</span>
       </p>
-      <button onClick={() => router.push("/")} className={primaryButton + " mt-2 text-lg"}>
-        Nowy quiz 🔁
-      </button>
+      <p className="text-sm text-white/40">Czekaj, aż host odpali nowy quiz 🎉</p>
     </div>
   );
 }
