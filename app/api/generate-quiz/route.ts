@@ -129,7 +129,7 @@ export async function POST(req: NextRequest) {
   const { data: quiz, error: quizError } = await supabase
     .from("quizzes")
     .insert({ prompt })
-    .select()
+    .select("id")
     .single();
 
   if (quizError || !quiz) {
@@ -154,18 +154,16 @@ export async function POST(req: NextRequest) {
   let roomCode: string | null = null;
   for (let attempt = 0; attempt < MAX_CODE_ATTEMPTS; attempt++) {
     const candidate = generateRoomCode();
-    const { data: room, error: roomError } = await supabase
+    const { error: roomError } = await supabase
       .from("rooms")
-      .insert({ code: candidate, quiz_id: quiz.id })
-      .select()
-      .single();
+      .insert({ code: candidate, quiz_id: quiz.id });
 
-    if (!roomError && room) {
-      roomCode = room.code;
+    if (!roomError) {
+      roomCode = candidate;
       break;
     }
     // Unique violation on `code` -> retry with a new random code.
-    if (roomError && roomError.code !== "23505") {
+    if (roomError.code !== "23505") {
       console.error("generate-quiz: failed to create room", roomError);
       return NextResponse.json({ error: "Nie udało się utworzyć pokoju." }, { status: 500 });
     }

@@ -159,6 +159,11 @@ export default function PlayRoom({ roomCode }: { roomCode: string }) {
     let cancelled = false;
     setQuestion(null);
     setAnswerError(null);
+    // A new round is live, so the previous round's buffered result has had
+    // its moment -- drop it now rather than letting its timer run on and
+    // eat into the time available to answer this question.
+    if (resultToShowTimeoutRef.current) clearTimeout(resultToShowTimeoutRef.current);
+    setResultToShow(null);
     fetch(`/api/rooms/${roomCode}/question?index=${room.current_question_index}`)
       .then((res) => res.json())
       .then((data) => {

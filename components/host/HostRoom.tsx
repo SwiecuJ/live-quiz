@@ -179,22 +179,15 @@ export default function HostRoom({ roomCode }: { roomCode: string }) {
     setResultRevealedAt(new Date().toISOString());
 
     let cancelled = false;
-    fetch(`/api/rooms/${roomCode}/question?reveal=1&index=${room.current_question_index}`)
+    fetch(
+      `/api/rooms/${roomCode}/question?reveal=1&withRoundAnswers=1&index=${room.current_question_index}`
+    )
       .then((res) => res.json())
       .then((data) => {
-        if (cancelled) return data;
+        if (cancelled) return;
         setQuestion(data.question);
         setTotalQuestions(data.totalQuestions);
-        return supabase
-          .from("answers")
-          .select("id, player_id, selected_index, points_awarded")
-          .eq("room_id", room.id)
-          .eq("question_id", data.question.id)
-          .order("points_awarded", { ascending: false });
-      })
-      .then((res) => {
-        if (cancelled) return;
-        if (res && "data" in res && res.data) setRoundAnswers(res.data as AnswerRow[]);
+        setRoundAnswers((data.roundAnswers ?? []) as AnswerRow[]);
       });
     return () => {
       cancelled = true;
