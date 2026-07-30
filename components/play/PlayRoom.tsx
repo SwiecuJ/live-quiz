@@ -53,7 +53,10 @@ export default function PlayRoom({ roomCode }: { roomCode: string }) {
   const [myAnswers, setMyAnswers] = useState<Record<string, MyAnswer>>({});
   const [answering, setAnswering] = useState(false);
   const [answerError, setAnswerError] = useState<string | null>(null);
-  const [resultRevealedAt, setResultRevealedAt] = useState<string | null>(null);
+  // Tagged with the round it belongs to -- see HostRoom for why an untagged
+  // timestamp here reads as "already elapsed" on the first render of a new
+  // round and makes the countdown show 0s.
+  const [resultRevealed, setResultRevealed] = useState<{ key: string; at: string } | null>(null);
 
   // The round result to actually display right now, independent of what
   // room.status has moved on to. Set the moment reveal data for a round
@@ -192,7 +195,7 @@ export default function PlayRoom({ roomCode }: { roomCode: string }) {
     const key = `${room.status}-${room.current_question_index}`;
     if (loadedResultKeyRef.current === key) return;
     loadedResultKeyRef.current = key;
-    setResultRevealedAt(new Date().toISOString());
+    setResultRevealed({ key, at: new Date().toISOString() });
 
     fetch(
       `/api/rooms/${roomCode}/question?reveal=1&index=${room.current_question_index}&playerId=${player.id}`
@@ -225,8 +228,11 @@ export default function PlayRoom({ roomCode }: { roomCode: string }) {
     room?.round_time_seconds ?? 20
   );
 
+  const roundKey = room ? `${room.status}-${room.current_question_index}` : null;
   const nextCountdown = useCountdown(
-    room?.status === "round_result" ? resultRevealedAt : null,
+    room?.status === "round_result" && resultRevealed?.key === roundKey
+      ? resultRevealed.at
+      : null,
     NEXT_QUESTION_DELAY_SECONDS
   );
 

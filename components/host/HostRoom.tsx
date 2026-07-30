@@ -62,7 +62,14 @@ export default function HostRoom({ roomCode }: { roomCode: string }) {
 
   const [starting, setStarting] = useState(false);
   const [advancing, setAdvancing] = useState(false);
-  const [resultRevealedAt, setResultRevealedAt] = useState<string | null>(null);
+  // Tagged with the round it belongs to. This is separate state set from an
+  // effect, so it necessarily lags `room` by one render: on the first render
+  // after a new round_result arrives it still holds the PREVIOUS round's
+  // timestamp. Untagged, that stale timestamp read as "the delay already
+  // elapsed", and the auto-advance below fired instantly -- skipping the
+  // round result. Comparing the tag against the live round makes that render
+  // resolve to null (countdown not started) instead of to a bogus deadline.
+  const [resultRevealed, setResultRevealed] = useState<{ key: string; at: string } | null>(null);
   const [summary, setSummary] = useState<{
     questions: SummaryQuestion[];
     answers: SummaryAnswer[];
@@ -176,7 +183,7 @@ export default function HostRoom({ roomCode }: { roomCode: string }) {
     const key = `${room.status}-${room.current_question_index}`;
     if (loadedResultKeyRef.current === key) return;
     loadedResultKeyRef.current = key;
-    setResultRevealedAt(new Date().toISOString());
+    setResultRevealed({ key, at: new Date().toISOString() });
 
     let cancelled = false;
     fetch(
@@ -207,8 +214,11 @@ export default function HostRoom({ roomCode }: { roomCode: string }) {
     room?.round_time_seconds ?? 20
   );
 
+  const roundKey = room ? `${room.status}-${room.current_question_index}` : null;
   const nextCountdown = useCountdown(
-    room?.status === "round_result" ? resultRevealedAt : null,
+    room?.status === "round_result" && resultRevealed?.key === roundKey
+      ? resultRevealed.at
+      : null,
     NEXT_QUESTION_DELAY_SECONDS
   );
 
