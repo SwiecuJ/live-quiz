@@ -733,7 +733,9 @@ function RoundResultView({
               </span>
               <span>{opt}</span>
               {isRightAnswer && <span className="text-xs">✓ To ta!</span>}
-              {wasPicked && !isRightAnswer && <span className="text-xs">👈 Twoja</span>}
+              {/* Points up at the option above it, not sideways -- the badge
+                  sits under the text now that these are 2x2 tiles. */}
+              {wasPicked && !isRightAnswer && <span className="text-xs">👆 Twoja</span>}
             </div>
           );
         })}
