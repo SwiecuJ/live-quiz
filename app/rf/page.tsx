@@ -6,6 +6,14 @@ import Link from "next/link";
 import { card, gradientText, primaryButton, inputBase } from "@/lib/theme";
 import { setRfHostMode } from "@/lib/ryzykfizyk/hostKey";
 import { ROUND_OPTIONS, DEFAULT_ROUNDS, START_BALANCE } from "@/lib/ryzykfizyk/betting";
+import type { RfLevel } from "@/lib/ryzykfizyk/questions";
+
+const LEVEL_OPTIONS: { value: "" | RfLevel; label: string }[] = [
+  { value: "", label: "Wszystko po trochu" },
+  { value: "latwy", label: "Łatwy" },
+  { value: "sredni", label: "Średni" },
+  { value: "trudny", label: "Trudny" },
+];
 
 export default function RyzykFizykHome() {
   const router = useRouter();
@@ -14,6 +22,8 @@ export default function RyzykFizykHome() {
   const [createError, setCreateError] = useState<string | null>(null);
   const [playsToo, setPlaysToo] = useState(false);
   const [rounds, setRounds] = useState<number>(DEFAULT_ROUNDS);
+  // "" means draw from the whole pool.
+  const [level, setLevel] = useState<"" | RfLevel>("");
   const [joinCode, setJoinCode] = useState("");
 
   async function handleCreate() {
@@ -25,7 +35,7 @@ export default function RyzykFizykHome() {
       const res = await fetch("/api/rf/rooms", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rounds }),
+        body: JSON.stringify({ rounds, level: level || undefined }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -100,20 +110,37 @@ export default function RyzykFizykHome() {
         <div className={`flex flex-col gap-3 p-6 ${card}`}>
           <h2 className="text-lg font-black text-white">Odpal grę 🎰</h2>
 
-          <label className="flex flex-col gap-2 text-left text-sm font-semibold text-white/70">
-            Ile rund?
-            <select
-              value={rounds}
-              onChange={(e) => setRounds(Number(e.target.value))}
-              className={inputBase}
-            >
-              {ROUND_OPTIONS.map((n) => (
-                <option key={n} value={n} className="bg-[#0a0a0c]">
-                  {n}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="flex flex-col gap-2 text-left text-sm font-semibold text-white/70">
+              Ile rund?
+              <select
+                value={rounds}
+                onChange={(e) => setRounds(Number(e.target.value))}
+                className={inputBase}
+              >
+                {ROUND_OPTIONS.map((n) => (
+                  <option key={n} value={n} className="bg-[#0a0a0c]">
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="flex flex-col gap-2 text-left text-sm font-semibold text-white/70">
+              Poziom
+              <select
+                value={level}
+                onChange={(e) => setLevel(e.target.value as "" | RfLevel)}
+                className={inputBase}
+              >
+                {LEVEL_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value} className="bg-[#0a0a0c]">
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
 
           {/* Same shape as Quizownia: showing the board is the default, and
               sitting at the table on the same device is the opt-in. */}

@@ -36,7 +36,18 @@ Zasady:
 - "correctIndex" to indeks (0-3) poprawnej odpowiedzi w tablicy "options".
 - Pytania muszą być zróżnicowane i związane z tematem podanym przez użytkownika.
 - Odpowiedzi mają być zwięzłe (maks. kilka słów).
-- Nie dodawaj żadnego wyjaśnienia ani komentarza poza samym JSON-em.`;
+- Nie dodawaj żadnego wyjaśnienia ani komentarza poza samym JSON-em.
+
+JĘZYK — to jest równie ważne jak reszta:
+- Układaj pytania OD RAZU po polsku. Nie pisz ich najpierw po angielsku i nie tłumacz.
+- Żadnych kalk z angielskiego ani zdań, które brzmią jak tłumaczenie. Jeśli pytanie
+  dałoby się poznać po tym, że "pachnie" angielskim oryginałem — napisz je inaczej.
+- Naturalna, żywa polszczyzna, jakiej użyłby prowadzący na domówce.
+- Odmieniaj nazwy własne po polsku tam, gdzie tak się mówi (w Paryżu, do Krakowa).
+- Jeśli temat na to pozwala, sięgaj po polski kontekst i polskie realia zamiast
+  domyślnie amerykańskich.
+- Używaj polskich jednostek i zapisu liczb (przecinek dziesiętny, stopnie Celsjusza,
+  kilometry, złotówki).`;
 }
 
 function extractJson(text: string): string {
