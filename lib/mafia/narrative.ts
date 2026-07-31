@@ -1,79 +1,100 @@
 /**
- * The bit a human narrator would improvise. Templates rather than generated
- * text: they cost nothing, arrive instantly, and can't wander off into
- * something that contradicts what actually happened in the game.
+ * The part a human narrator would improvise, written out so nobody has to.
+ * These are meant to be read aloud, so they're whole little scenes rather
+ * than captions -- a table needs something to react to, not a status line.
+ *
+ * Templates rather than generated text: they cost nothing, appear instantly,
+ * and can't wander off into a version of events that contradicts what
+ * actually happened in the game.
  *
  * `{ofiara}` is the victim's nickname.
  */
+
+const OPENING = [
+  "Miasteczko wygląda jak z pocztówki. Rynek, fontanna, dwa bary i jedna apteka. Wszyscy się znają, wszyscy się pozdrawiają.\n\nOd trzech tygodni ktoś znika. Policja rozkłada ręce. Ludzie przestali zostawiać otwarte okna.\n\nDziś wieczorem gaśnie ostatnie światło. Ktoś przy tym stole wie dokładnie, co się dzieje.",
+  "Wszystko zaczęło się od plotki, że w mieście ktoś jest. Nie przyjechał — po prostu jest. Ktoś, kto zna wasze rozkłady dnia lepiej niż wy sami.\n\nNikt w to nie wierzył. Do wczoraj.\n\nDziś w nocy przekonacie się, że plotka miała twarz. Prawdopodobnie znajomą.",
+  "Autobus do miasta jeździ dwa razy dziennie. Ostatni odjechał o osiemnastej i nikt nim nie odjechał.\n\nCo znaczy, że kto tu jest — zostaje. Łącznie z tym, kto zaczął to wszystko.\n\nDobranoc. Śpijcie dobrze, jeśli potraficie.",
+  "Na zebraniu sołtys powiedział, żeby nie panikować. Godzinę później sam zamknął sklep na cztery spusty.\n\nDziś nikt nie będzie spał spokojnie. Jedni ze strachu, inni dlatego, że mają robotę do wykonania.",
+];
+
+const NIGHTFALL = [
+  "Gasną latarnie. Miasto zamyka oczy — jedno po drugim, aż zostaje tylko szum lodówki i czyjeś kroki na klatce.",
+  "Zegar na wieży wybija dwunastą. Ostatnie okno gaśnie. W ciemności ktoś właśnie otwiera oczy.",
+  "Miasto idzie spać. Ktoś udaje, że też.",
+  "Ostatni pies przestaje szczekać. Zapada cisza, w której słychać każdy krok na żwirze.",
+];
+
+const MAFIA_WAKES = [
+  "Mafia otwiera oczy. Rozpoznajecie się bez słowa — to znaczy, że tej nocy działacie razem.",
+  "Cisza. Trzy piętra niżej ktoś otwiera drzwi bez skrzypnięcia. Wiecie, po co.",
+  "Wasza kolej. Spójrzcie po sobie i zdecydujcie, kto rano się nie obudzi.",
+];
+
 const DEATHS = [
-  "{ofiara} miał(a) wracać na jednego. Znaleziono tylko przewrócony kubek i otwarte drzwi.",
-  "Sąsiedzi słyszeli w nocy śmiech, potem ciszę. Rano {ofiara} już nie otworzył(a).",
-  "{ofiara} pisał(a) właśnie wiadomość. Urwała się w połowie słowa.",
-  "Ktoś zostawił {ofiara} kwiaty pod drzwiami. Za wcześnie, żeby to był przypadek.",
-  "Rano na przystanku stała nietknięta kawa {ofiara}. Właściciel(ka) się nie zjawił(a).",
-  "{ofiara} znaleziono w kotłowni. Nikt nie umie wyjaśnić, co tam robił(a).",
-  "Ostatni raz widziano {ofiara} przy moście. Została tylko kurtka na barierce.",
-  "{ofiara} miał(a) rano pociąg. Walizka spakowana, bilet na stole, nikogo w mieszkaniu.",
-  "W nocy zgasło światło na całej ulicy. Kiedy wróciło, {ofiara} już nie żył(a).",
-  "{ofiara} odebrał(a) telefon o drugiej w nocy. To był ostatni raz.",
-  "Pies {ofiara} wył do rana. Rano wiedzieliśmy dlaczego.",
-  "{ofiara} zostawił(a) niedokończoną partię szachów. Czarne miały mata w dwóch ruchach.",
-  "Ktoś przestawił wszystkie zegary w domu {ofiara}. Nikt nie wie po co.",
-  "Rano drzwi {ofiara} były otwarte na oścież. Klucze wisiały od środka.",
-  "{ofiara} obiecał(a), że powie coś ważnego rano. Nie zdążył(a).",
-  "Na lustrze w łazience {ofiara} ktoś napisał palcem jedno słowo. Zdążyło wyparować.",
+  "Rano na klatce leżała gazeta, której nikt nie odebrał.\n\n{ofiara} miał(a) wracać na jednego. Zamiast tego został(a) przewrócony kubek, otwarte drzwi i kurtka na oparciu krzesła.\n\nNikt nic nie słyszał. Wszyscy mówią, że nic nie słyszeli.",
+  "Sąsiadka z dołu mówi, że w nocy słyszała śmiech. Potem coś ciężkiego. Potem nic.\n\nRano {ofiara} nie otworzył(a) drzwi. Nie otworzy już nigdy.\n\nNa stole stygła herbata, nalana dla dwóch osób.",
+  "{ofiara} pisał(a) właśnie wiadomość. Urwała się w połowie słowa — telefon leżał ekranem do góry, jeszcze ciepły.\n\nDo kogo pisał(a)? Nikt nie ma odwagi sprawdzić.",
+  "Na przystanku stała nietknięta kawa. Wystygła, z odciskiem szminki na brzegu.\n\n{ofiara} nigdy nie spóźniał(a) się na autobus. Dziś autobus odjechał pusty.",
+  "Znaleziono {ofiara} w kotłowni, do której klucz miały trzy osoby w tym mieście.\n\nJedna z nich zgłosiła znalezisko. Dwie pozostałe siedzą teraz przy tym stole.",
+  "Ostatni raz widziano {ofiara} przy moście. Została kurtka, przewieszona przez barierkę, i papieros dopalony do filtra.\n\nKtoś stał tam z nim(nią) wystarczająco długo, żeby wypalić całego.",
+  "W nocy zgasło światło na całej ulicy — awaria, powiedzieli z zakładu.\n\nKiedy wróciło, drzwi {ofiara} były otwarte na oścież, a klucze wisiały od środka.",
+  "Pies {ofiara} wył od trzeciej do rana. Sąsiedzi przeklinali przez sen.\n\nO siódmej wszyscy już wiedzieli, dlaczego wył.",
+  "{ofiara} zostawił(a) niedokończoną partię szachów. Czarne miały mata w dwóch ruchach.\n\nDrugie krzesło było jeszcze ciepłe.",
+  "{ofiara} obiecał(a) wczoraj, że rano powie coś ważnego. Że wie coś, czego nie powinien(nna) wiedzieć.\n\nRano nie było już komu mówić.",
+  "Na lustrze w łazience ktoś napisał palcem jedno słowo. Zanim przyszła policja, para wyparowała i słowo zniknęło.\n\n{ofiara} leżał(a) pod prysznicem, w ubraniu.",
+  "Wszystkie zegary w mieszkaniu {ofiara} pokazywały inną godzinę. Ktoś je poprzestawiał, po kolei, spokojnie.\n\nTo nie był pośpiech. To był rytuał.",
 ];
 
 const SAVED = [
-  "W nocy ktoś się dobijał do drzwi. Ktoś inny akurat nie spał — i tej nocy nikt nie zginął.",
-  "Był krzyk, było szarpanie, było wezwane pogotowie. Nad ranem wszyscy są cali.",
-  "Ktoś tej nocy miał wielkie szczęście. Albo bardzo czujnego anioła stróża.",
-  "Mafia wyszła na łowy i wróciła z pustymi rękami. Tej nocy nikt nie zginął.",
-  "Ktoś zdążył zamknąć drzwi w ostatniej chwili. Rano wszyscy siadają do stołu.",
+  "W nocy ktoś dobijał się do drzwi. Ktoś inny akurat nie spał i zdążył — drzwi wytrzymały, kroki oddaliły się po schodach.\n\nRano wszyscy siadają do stołu. Wszyscy, co do jednego.\n\nKtoś przy tym stole jest wściekły i musi to ukryć.",
+  "Był krzyk. Było szarpanie. Było wezwane pogotowie o czwartej nad ranem.\n\nI jest — nad podziw — komplet przy śniadaniu. Ktoś tej nocy pracował szybciej od mafii.",
+  "Mafia wyszła na łowy i wróciła z pustymi rękami. Ktoś ich uprzedził, choć sam nie wie, jak blisko był(a).\n\nTej nocy nikt nie zginął. Następnej może nie być tak łatwo.",
 ];
 
 const NO_KILL = [
-  "Tej nocy w mieście było podejrzanie spokojnie.",
-  "Nikt nie zginął. Nikt też nie spał dobrze.",
-  "Noc minęła bez ofiar. To nie znaczy, że nic się nie działo.",
+  "Noc minęła bez ofiar. Nikt nie zginął — i nikt nie spał.\n\nTo gorsze niż trup. Trup przynajmniej coś mówi.",
+  "Rano wszyscy są na miejscu. Policzcie się dwa razy, bo nikt w to nie wierzy.\n\nCzyli albo mafia odpuściła, albo coś planuje.",
 ];
 
 const LYNCH = [
-  "Miasto wywlekło {ofiara} na rynek. Nie było litości.",
-  "Głosowanie było krótkie. {ofiara} nie zdążył(a) się nawet wytłumaczyć.",
-  "{ofiara} krzyczał(a) do końca, że to pomyłka.",
-  "Tłum zdecydował. {ofiara} znika z miasta.",
-  "Ktoś rzucił pierwszy kamień, reszta poszła za nim. {ofiara} przegrał(a) tę rozmowę.",
+  "Miasto nie chciało już czekać. {ofiara} wywleczono na rynek, pod fontannę, przy której latem tańczono na dożynkach.\n\nKrzyczał(a) do samego końca, że to pomyłka.",
+  "Głosowanie trwało krócej niż rozmowa o pogodzie. {ofiara} nie zdążył(a) nawet dokończyć zdania.\n\nKtoś rzucił pierwszy kamień. Reszta poszła za nim, jak zawsze.",
+  "Sąsiedzi, z którymi {ofiara} pił(a) w zeszłym tygodniu, dziś odwrócili wzrok.\n\nWyrok wykonano przed południem. Nikt nie protestował głośno.",
+  "{ofiara} powtarzał(a) w kółko to samo nazwisko. Nikt nie słuchał.\n\nMiasto podjęło decyzję i miasto ją wykonało.",
 ];
 
 const NO_LYNCH = [
-  "Miasto się pokłóciło i nikogo nie wskazało. Noc zapada bez wyroku.",
-  "Głosy rozłożyły się po równo. Nikt dziś nie zawiśnie.",
-  "Za dużo krzyku, za mało zgody. Nikogo nie osądzono.",
+  "Kłótnia trwała do zmierzchu. Padły trzy nazwiska, dwa oskarżenia i jedno wyzwisko, którego nikt nie powtórzy.\n\nGłosy rozłożyły się po równo. Nikt dziś nie zawiśnie — a noc zapada tak samo szybko.",
+  "Miasto nie umiało się dogadać. Za dużo krzyku, za mało dowodów.\n\nWszyscy wracają do domów. Ktoś wraca zadowolony.",
+];
+
+const MAFIA_WINS = [
+  "Zostało was tylu, co ich. Od tej chwili każde głosowanie kończy się tak, jak oni zechcą.\n\nMiasto formalnie istnieje. Praktycznie należy do kogoś innego.",
+  "Nie ma już kogo przegłosować. Mafia siedzi przy stole, nalewa sobie i nikomu się nie tłumaczy.\n\nMiasto przegrało tydzień temu. Dopiero dziś to zauważyło.",
+];
+
+const TOWN_WINS = [
+  "Ostatni z nich wyszedł w kajdankach, a miasto stało w milczeniu i patrzyło.\n\nWieczorem ktoś wreszcie zostawił otwarte okno.",
+  "Wyłapaliście wszystkich. Co do jednego.\n\nJutro znowu pojedzie autobus, a w barze będzie o czym gadać przez najbliższe dziesięć lat.",
 ];
 
 const pick = (list: string[], seed: number) => list[seed % list.length];
 
 /**
- * `seed` keeps the text stable for a given night: the screen re-renders
- * constantly and a fresh random line each time would be unreadable.
+ * `seed` keeps the wording stable for a given beat: the screen re-renders
+ * constantly and a fresh random scene each time would be unreadable.
  */
-export function deathStory(victim: string, seed: number): string {
-  return pick(DEATHS, seed).replaceAll("{ofiara}", victim);
-}
+export const openingScene = (seed: number) => pick(OPENING, seed);
+export const nightfallScene = (seed: number) => pick(NIGHTFALL, seed);
+export const mafiaWakesScene = (seed: number) => pick(MAFIA_WAKES, seed);
+export const savedStory = (seed: number) => pick(SAVED, seed);
+export const noKillStory = (seed: number) => pick(NO_KILL, seed);
+export const noLynchStory = (seed: number) => pick(NO_LYNCH, seed);
+export const mafiaWinsScene = (seed: number) => pick(MAFIA_WINS, seed);
+export const townWinsScene = (seed: number) => pick(TOWN_WINS, seed);
 
-export function savedStory(seed: number): string {
-  return pick(SAVED, seed);
-}
+export const deathStory = (victim: string, seed: number) =>
+  pick(DEATHS, seed).replaceAll("{ofiara}", victim);
 
-export function noKillStory(seed: number): string {
-  return pick(NO_KILL, seed);
-}
-
-export function lynchStory(victim: string, seed: number): string {
-  return pick(LYNCH, seed).replaceAll("{ofiara}", victim);
-}
-
-export function noLynchStory(seed: number): string {
-  return pick(NO_LYNCH, seed);
-}
+export const lynchStory = (victim: string, seed: number) =>
+  pick(LYNCH, seed).replaceAll("{ofiara}", victim);

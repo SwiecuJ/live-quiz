@@ -24,7 +24,18 @@ import {
   ROLE_NIGHT_PROMPT,
   rolesFor,
 } from "@/lib/mafia/roles";
-import { deathStory, savedStory, noKillStory, lynchStory, noLynchStory } from "@/lib/mafia/narrative";
+import {
+  openingScene,
+  nightfallScene,
+  mafiaWakesScene,
+  deathStory,
+  savedStory,
+  noKillStory,
+  lynchStory,
+  noLynchStory,
+  mafiaWinsScene,
+  townWinsScene,
+} from "@/lib/mafia/narrative";
 import type { MfMe, MfPlayer, MfRoom } from "@/lib/mafia/types";
 
 const noopSubscribe = () => () => {};
@@ -167,6 +178,16 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
     refreshMe();
   }, [room, creds, refreshMe]);
 
+  // The crew can't talk, so through the night their card is re-read to show
+  // what the others have picked -- that's how they converge on one name.
+  const isNight = room?.status === "noc";
+  const amMafia = me?.role === "mafia";
+  useEffect(() => {
+    if (!isNight || !amMafia || !creds) return;
+    const interval = setInterval(refreshMe, PROGRESS_POLL_MS);
+    return () => clearInterval(interval);
+  }, [isNight, amMafia, creds, refreshMe]);
+
   // ---- how many have acted ---------------------------------------------
   const countingPhase = room?.status === "noc" || room?.status === "glosowanie";
   useEffect(() => {
@@ -271,12 +292,38 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
   if (loadError) return <Centered title="Ups!" message={loadError} />;
   if (!room) return <Centered title="Chwila…" message="Zaglądam do miasta." />;
 
+  const ev = room.last_event;
   const alive = players.filter((p) => p.alive);
   const dead = players.filter((p) => !p.alive);
   const iAmPlayer = !!creds;
   const myPlayer = creds ? players.find((p) => p.id === creds.playerId) : undefined;
   const amAlive = myPlayer?.alive ?? false;
-  const picked = pickedByDay[`${room.status}-${room.day_number}`];
+  // Falls back to the server's copy so a reload mid-night doesn't look like
+  // you never picked.
+  const picked = pickedByDay[`${room.status}-${room.day_number}`] ?? me?.myPick ?? undefined;
+
+  /** Takes over running the game and moves it on, so a table whose host
+   *  device was never marked can't get stranded mid-phase. */
+  const claimAndAdvance = () => {
+    setRfHostMode(hostKey(roomCode), "play");
+    setClaimedHost(true);
+    advance();
+  };
+
+  const nextButton = (label: string) =>
+    isHost ? (
+      <button onClick={advance} disabled={busy} className={primaryButton + " text-lg"}>
+        {label}
+      </button>
+    ) : (
+      <button
+        onClick={claimAndAdvance}
+        disabled={busy}
+        className="text-sm font-bold text-white/40 underline underline-offset-4"
+      >
+        Nikt nie klika? Przejmij prowadzenie — {label}
+      </button>
+    );
   const joinUrl =
     typeof window !== "undefined" ? `${window.location.origin}/mafia/${roomCode}` : "";
 
@@ -378,6 +425,66 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
     );
   }
 
+  // ---- cards on the table, before the first night ------------------------
+  if (room.status === "role_reveal") {
+    const iAmReady = myPlayer?.ready ?? false;
+    return (
+      <div className="flex flex-1 flex-col gap-4 p-4 text-white">
+        <p className="text-center text-xs font-bold uppercase tracking-widest text-white/40">
+          {progress ? `${progress.acted} / ${progress.alive} przeczytało` : "Rozdanie"}
+        </p>
+
+        <div className={`whitespace-pre-line p-5 text-center text-sm leading-relaxed ${card}`}>
+          {openingScene(ev?.seed ?? 0)}
+        </div>
+
+        {!iAmPlayer ? (
+          <div className={`p-6 text-center ${card}`}>
+            <p className="font-black">Prowadzisz miasto.</p>
+            <p className="mt-1 text-sm text-white/50">Czekaj, aż wszyscy poznają swoje role.</p>
+          </div>
+        ) : !me?.role ? (
+          <Centered title="Chwila…" message="Rozdaję karty." />
+        ) : (
+          <>
+            <div className={`p-6 text-center ${card}`}>
+              <p className="text-5xl">{ROLE_EMOJI[me.role]}</p>
+              <p className={`mt-2 text-2xl font-black ${gradientText}`}>{ROLE_LABEL[me.role]}</p>
+              <p className="mt-2 text-sm text-white/60">{ROLE_DESCRIPTION[me.role]}</p>
+              {me.allies.length > 0 && (
+                <p className="mt-3 rounded-xl border-2 border-rose-400/40 bg-rose-400/10 px-3 py-2 text-sm font-bold text-rose-200">
+                  Grasz z: {me.allies.join(", ")}
+                </p>
+              )}
+              <p className="mt-3 text-xs text-white/30">
+                Nikt inny tego nie widzi. Zapamiętaj i schowaj telefon.
+              </p>
+            </div>
+
+            {iAmReady ? (
+              <p className="text-center text-sm font-bold text-white/50">
+                Wiesz już, kim jesteś. Czekamy na resztę…
+              </p>
+            ) : (
+              <button
+                onClick={() => pick(creds!.playerId)}
+                disabled={busy}
+                className={primaryButton + " text-lg"}
+              >
+                Wiem, kim jestem 👍
+              </button>
+            )}
+          </>
+        )}
+
+        {actionError && (
+          <p className="text-center text-sm font-semibold text-rose-400">{actionError}</p>
+        )}
+        {nextButton("gasimy światła 🌙")}
+      </div>
+    );
+  }
+
   if (room.status === "koniec") {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-4 p-6 text-center text-white">
@@ -385,6 +492,11 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
         <h1 className={`text-3xl font-black ${gradientText}`}>
           {room.winner === "mafia" ? "Mafia przejęła miasto" : "Miasto wygrało!"}
         </h1>
+        <div className={`whitespace-pre-line p-5 text-center text-sm leading-relaxed ${card}`}>
+          {room.winner === "mafia"
+            ? mafiaWinsScene(ev?.seed ?? 0)
+            : townWinsScene(ev?.seed ?? 0)}
+        </div>
         <div className={`w-full max-w-sm p-4 ${card}`}>
           <p className="mb-3 text-sm font-black text-white/70">Kto był kim</p>
           <ul className="flex flex-col gap-2">
@@ -417,7 +529,6 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
     );
   }
 
-  const ev = room.last_event;
   const dayHeader = (
     <div className="grid w-full grid-cols-3 items-center gap-2 text-sm font-bold text-white/60">
       <span className="text-left">Dzień {room.day_number}</span>
@@ -434,6 +545,10 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
       <div className="flex flex-1 flex-col gap-3 p-4 text-white">
         {dayHeader}
         <p className="text-center text-4xl">🌙</p>
+        <p className="whitespace-pre-line text-center text-sm italic leading-relaxed text-white/50">
+          {nightfallScene(room.day_number)}
+          {me?.role === "mafia" ? `\n\n${mafiaWakesScene(room.day_number)}` : ""}
+        </p>
 
         {!iAmPlayer || !amAlive ? (
           <div className={`p-6 text-center ${card}`}>
@@ -462,6 +577,17 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
               </div>
             )}
 
+            {me?.role === "mafia" && me.allyPicks.length > 0 && (
+              <div className="rounded-xl border-2 border-rose-400/40 bg-rose-400/10 px-3 py-2 text-center text-xs font-bold text-rose-200">
+                {me.allyPicks
+                  .map((a) => `${a.nickname}: ${a.target ?? "jeszcze się zastanawia"}`)
+                  .join(" • ")}
+                <span className="mt-1 block font-medium text-rose-200/60">
+                  Musicie wskazać tę samą osobę — inaczej nikt nie zginie.
+                </span>
+              </div>
+            )}
+
             <p className="text-center text-sm font-black">
               {me?.role ? ROLE_NIGHT_PROMPT[me.role] : "Wybierz kogoś"}
             </p>
@@ -473,12 +599,14 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
                   <button
                     key={p.id}
                     onClick={() => pick(p.id)}
-                    disabled={busy || !!picked}
+                    /* Changeable until the night closes: the crew has to be
+                       able to move onto whoever the others settled on. */
+                    disabled={busy}
                     className={`rounded-2xl border-2 px-3 py-4 text-sm font-black transition-all ${
                       picked === p.id
                         ? "border-black bg-rose-400 text-black shadow-[4px_4px_0_0_#000]"
                         : "border-white/15 bg-white/5 text-white/80"
-                    } ${picked && picked !== p.id ? "opacity-30" : ""}`}
+                    }`}
                   >
                     <span className="block text-xl">{avatarFor(p.id)}</span>
                     {p.nickname}
@@ -488,7 +616,7 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
 
             {picked && (
               <p className="text-center text-xs font-bold text-white/50">
-                Wybrane. Czekamy na resztę miasta…
+                Wybrane — możesz jeszcze zmienić zdanie. Czekamy na resztę…
               </p>
             )}
             {actionError && (
@@ -496,6 +624,9 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
             )}
           </>
         )}
+
+        {/* Someone always forgets to tap; the night mustn't hang on them. */}
+        <div className="mt-auto pt-2 text-center">{nextButton("kończymy noc 🌅")}</div>
       </div>
     );
   }
@@ -515,7 +646,7 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
         {dayHeader}
         <p className="text-center text-4xl">🌅</p>
         <div className={`p-5 text-center ${card}`}>
-          <p className="text-base font-bold leading-relaxed">{story}</p>
+          <p className="whitespace-pre-line text-base font-bold leading-relaxed">{story}</p>
           {ev?.victimName && !ev.saved && ev.victimRole && (
             <p className="mt-3 text-sm text-white/60">
               {ev.victimName} był(a): {ROLE_EMOJI[ev.victimRole]} {ROLE_LABEL[ev.victimRole]}
@@ -523,11 +654,7 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
           )}
         </div>
         <AliveList players={alive} dead={dead} />
-        {isHost && (
-          <button onClick={advance} disabled={busy} className={primaryButton + " text-lg"}>
-            Głosujemy 🗳️
-          </button>
-        )}
+        {nextButton("Głosujemy 🗳️")}
       </div>
     );
   }
@@ -590,7 +717,7 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
       {dayHeader}
       <p className="text-center text-4xl">⚖️</p>
       <div className={`p-5 text-center ${card}`}>
-        <p className="text-base font-bold leading-relaxed">{verdict}</p>
+        <p className="whitespace-pre-line text-base font-bold leading-relaxed">{verdict}</p>
         {ev?.victimName && ev.victimRole && (
           <p className="mt-3 text-sm text-white/60">
             {ev.victimName} był(a): {ROLE_EMOJI[ev.victimRole]} {ROLE_LABEL[ev.victimRole]}
@@ -598,10 +725,9 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
         )}
       </div>
       <AliveList players={alive} dead={dead} />
-      {isHost && (
-        <button onClick={advance} disabled={busy} className={primaryButton + " text-lg"}>
-          Zapada noc 🌙
-        </button>
+      {nextButton("Zapada noc 🌙")}
+      {actionError && (
+        <p className="text-center text-sm font-semibold text-rose-400">{actionError}</p>
       )}
     </div>
   );

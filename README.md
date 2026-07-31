@@ -44,7 +44,9 @@ cp .env.local.example .env.local
 
 6. Wklej i uruchom [`supabase/migrations/0004_mafia.sql`](supabase/migrations/0004_mafia.sql) — tabele Mafii (`mf_*`). Bez niej pozostałe gry działają normalnie, a Mafia mówi wprost, że brakuje migracji.
 
-7. Sprawdź w **Database → Replication**, że tabele `rooms`, `players`, `answers`, `rf_*` oraz `mf_rooms` / `mf_players` / `mf_votes` są dodane do publikacji `supabase_realtime` (migracje robią to automatycznie). `mf_secrets` i `mf_actions` celowo **nie** są publikowane — to one trzymają role i nocne wybory.
+7. Wklej i uruchom [`supabase/migrations/0005_mafia_role_reveal.sql`](supabase/migrations/0005_mafia_role_reveal.sql) — dodaje fazę poznawania roli przed pierwszą nocą.
+
+8. Sprawdź w **Database → Replication**, że tabele `rooms`, `players`, `answers`, `rf_*` oraz `mf_rooms` / `mf_players` / `mf_votes` są dodane do publikacji `supabase_realtime` (migracje robią to automatycznie). `mf_secrets` i `mf_actions` celowo **nie** są publikowane — to one trzymają role i nocne wybory.
 
 ## 3. Uruchomienie lokalne
 

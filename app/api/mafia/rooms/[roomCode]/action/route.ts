@@ -63,6 +63,19 @@ export async function POST(
     return NextResponse.json({ error: "Nie żyjesz. Oglądaj." }, { status: 409 });
   }
 
+  // During the reveal the only thing to submit is "I've seen my card".
+  if (room.status === "role_reveal") {
+    const { error } = await supabase
+      .from("mf_players")
+      .update({ ready: true })
+      .eq("id", playerId);
+    if (error) {
+      console.error("mafia: failed to mark ready", error);
+      return NextResponse.json({ error: "Nie zapisało się." }, { status: 500 });
+    }
+    return NextResponse.json({ ok: true });
+  }
+
   // The target has to be someone still in the game.
   if (targetId) {
     const { data: target } = await supabase

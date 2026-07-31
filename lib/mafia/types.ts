@@ -1,9 +1,16 @@
 import type { MafiaRole } from "./roles";
 
-export type MafiaStatus = "lobby" | "noc" | "dzien" | "glosowanie" | "wynik" | "koniec";
+export type MafiaStatus =
+  | "lobby"
+  | "role_reveal"
+  | "noc"
+  | "dzien"
+  | "glosowanie"
+  | "wynik"
+  | "koniec";
 
 export interface MfLastEvent {
-  type: "noc" | "lincz";
+  type: "start" | "noc" | "lincz";
   seed: number;
   victimName: string | null;
   victimRole: MafiaRole | null;
@@ -27,6 +34,7 @@ export interface MfPlayer {
   nickname: string;
   device_id: string | null;
   alive: boolean;
+  ready: boolean;
   revealed_role: MafiaRole | null;
   created_at: string;
 }
@@ -35,4 +43,7 @@ export interface MfMe {
   role: MafiaRole | null;
   allies: string[];
   findings: { nickname: string; isMafia: boolean }[];
+  /** Mafia only: what the rest of the crew has picked so far tonight. */
+  allyPicks: { nickname: string; target: string | null }[];
+  myPick: string | null;
 }

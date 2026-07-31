@@ -57,7 +57,18 @@ export async function POST(
     role: MafiaRole | null;
     allies: string[];
     findings: { nickname: string; isMafia: boolean }[];
-  } = { role, allies: [], findings: [] };
+    allyPicks: { nickname: string; target: string | null }[];
+    myPick: string | null;
+  } = { role, allies: [], findings: [], allyPicks: [], myPick: null };
+
+  // What this player has already chosen tonight, so a reload doesn't lose it.
+  const { data: ownAction } = await supabase
+    .from("mf_actions")
+    .select("target_id")
+    .eq("player_id", playerId)
+    .eq("day_number", room.day_number)
+    .maybeSingle();
+  response.myPick = ownAction?.target_id ?? null;
 
   if (role === "mafia") {
     const { data: allySecrets } = await supabase
@@ -68,11 +79,30 @@ export async function POST(
 
     const allyIds = (allySecrets ?? []).map((a) => a.player_id).filter((id) => id !== playerId);
     if (allyIds.length > 0) {
-      const { data: allies } = await supabase
-        .from("mf_players")
-        .select("nickname")
-        .in("id", allyIds);
+      const [{ data: allies }, { data: picks }] = await Promise.all([
+        supabase.from("mf_players").select("id, nickname").in("id", allyIds),
+        supabase
+          .from("mf_actions")
+          .select("player_id, target_id")
+          .in("player_id", allyIds)
+          .eq("day_number", room.day_number),
+      ]);
+
       response.allies = (allies ?? []).map((a) => a.nickname);
+
+      // The crew has to agree on one name without being able to talk, so
+      // each of them sees what the others have picked so far.
+      const targetIds = (picks ?? []).map((p) => p.target_id).filter(Boolean) as string[];
+      const { data: targets } = targetIds.length
+        ? await supabase.from("mf_players").select("id, nickname").in("id", targetIds)
+        : { data: [] };
+      const nameById = new Map((targets ?? []).map((t) => [t.id, t.nickname]));
+      const pickByAlly = new Map((picks ?? []).map((p) => [p.player_id, p.target_id]));
+
+      response.allyPicks = (allies ?? []).map((a) => ({
+        nickname: a.nickname,
+        target: pickByAlly.get(a.id) ? (nameById.get(pickByAlly.get(a.id)!) ?? null) : null,
+      }));
     }
   }
 

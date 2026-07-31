@@ -23,19 +23,28 @@ export async function GET(
 
   if (!room) return NextResponse.json({ error: "Nie ma takiego miasta." }, { status: 404 });
 
-  const table = room.status === "noc" ? "mf_actions" : "mf_votes";
-  const [{ count: acted }, { count: alive }] = await Promise.all([
-    supabase
-      .from(table)
-      .select("id", { count: "exact", head: true })
-      .eq("room_id", room.id)
-      .eq("day_number", room.day_number),
-    supabase
+  const { count: alive } = await supabase
+    .from("mf_players")
+    .select("id", { count: "exact", head: true })
+    .eq("room_id", room.id)
+    .eq("alive", true);
+
+  // During the reveal "acted" means "has looked at their card".
+  if (room.status === "role_reveal") {
+    const { count: ready } = await supabase
       .from("mf_players")
       .select("id", { count: "exact", head: true })
       .eq("room_id", room.id)
-      .eq("alive", true),
-  ]);
+      .eq("ready", true);
+    return NextResponse.json({ acted: ready ?? 0, alive: alive ?? 0 });
+  }
+
+  const table = room.status === "noc" ? "mf_actions" : "mf_votes";
+  const { count: acted } = await supabase
+    .from(table)
+    .select("id", { count: "exact", head: true })
+    .eq("room_id", room.id)
+    .eq("day_number", room.day_number);
 
   return NextResponse.json({ acted: acted ?? 0, alive: alive ?? 0 });
 }

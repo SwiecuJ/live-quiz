@@ -75,7 +75,7 @@ export async function POST(
     return checkWinner(aliveMafia, stillAlive.length - aliveMafia);
   };
 
-  // ---- lobby -> noc: deal the cards -------------------------------------
+  // ---- lobby -> role_reveal: deal the cards ------------------------------
   if (room.status === "lobby") {
     if (players.length < MIN_PLAYERS) {
       return NextResponse.json(
@@ -92,11 +92,41 @@ export async function POST(
         .eq("player_id", players[i].id);
     }
 
-    const { data } = await supabase
+    // Cards first, night second. Everyone needs to know what they are before
+    // the lights go out -- and the mafia need that moment to work out who
+    // they're killing, which they can't do once the clock is running.
+    const { data, error } = await supabase
       .from("mf_rooms")
-      .update({ status: "noc", day_number: 1, phase_started_at: new Date().toISOString() })
+      .update({
+        status: "role_reveal",
+        day_number: 1,
+        last_event: { type: "start", seed, victimName: null, victimRole: null },
+        phase_started_at: new Date().toISOString(),
+      })
       .eq("id", room.id)
       .eq("status", "lobby")
+      .select("id");
+
+    if (error) {
+      // Most likely 0005 hasn't run, so 'role_reveal' isn't an allowed
+      // status yet. Say so rather than appearing to do nothing.
+      console.error("mafia: failed to start", error);
+      return NextResponse.json(
+        { error: "Nie udało się zacząć. Czy migracja 0005 jest uruchomiona?" },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ ok: true, applied: (data?.length ?? 0) > 0 });
+  }
+
+  // ---- role_reveal -> noc ------------------------------------------------
+  if (room.status === "role_reveal") {
+    const { data } = await supabase
+      .from("mf_rooms")
+      .update({ status: "noc", phase_started_at: new Date().toISOString() })
+      .eq("id", room.id)
+      .eq("status", "role_reveal")
       .select("id");
 
     return NextResponse.json({ ok: true, applied: (data?.length ?? 0) > 0 });
