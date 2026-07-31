@@ -93,14 +93,22 @@ export default function Home() {
 
   return (
     <div className="relative flex flex-1 flex-col items-center justify-center px-4 py-16">
-      <Link
-        href="/rf"
-        className="absolute right-4 top-4 rotate-2 rounded-full border-2 border-black bg-amber-300 px-3 py-1.5 text-xs font-black uppercase tracking-wide text-black shadow-[3px_3px_0_0_#000] transition-transform hover:-translate-y-0.5 sm:right-6 sm:top-6 sm:text-sm"
-      >
-        🎲 Ryzyk Fizyk
-      </Link>
+      <div className="absolute right-4 top-4 flex flex-col items-end gap-2 sm:right-6 sm:top-6 sm:flex-row">
+        <Link
+          href="/rf"
+          className="rotate-2 rounded-full border-2 border-black bg-amber-300 px-3 py-1.5 text-xs font-black uppercase tracking-wide text-black shadow-[3px_3px_0_0_#000] transition-transform hover:-translate-y-0.5 sm:text-sm"
+        >
+          🎲 Ryzyk Fizyk
+        </Link>
+        <Link
+          href="/mafia"
+          className="-rotate-2 rounded-full border-2 border-black bg-rose-400 px-3 py-1.5 text-xs font-black uppercase tracking-wide text-black shadow-[3px_3px_0_0_#000] transition-transform hover:-translate-y-0.5 sm:text-sm"
+        >
+          🔪 Mafia
+        </Link>
+      </div>
 
-      <div className="w-full max-w-3xl text-center">
+      <div className="mt-14 w-full max-w-3xl text-center sm:mt-0">
         <span className="inline-block -rotate-2 rounded-full border-2 border-black bg-lime-300 px-4 py-1 text-xs font-black uppercase tracking-widest text-black shadow-[3px_3px_0_0_#000]">
           Quiz na żywo, gotowy w 10 sekund ⚡
         </span>

@@ -532,9 +532,15 @@ function GuessPhase({
   }
 
   return (
-    <div className="flex flex-1 flex-col gap-4 p-4 text-white">
+    /* Everything stays packed at the top, with the slack pushed to the bottom
+       instead of between the question and the input. On phones the keyboard
+       shrinks the viewport and the browser scrolls the focused field into
+       view -- with the question held apart by a flex-1 gap it got shoved off
+       the top of the screen, and you had to scroll back up to read what you
+       were even answering. */
+    <div className="flex flex-1 flex-col gap-3 p-4 text-white">
       <PhaseHeader left={roundLabel} right={`${remainingSeconds}s`} note={note} />
-      <h2 className="flex-1 px-1 py-6 text-center text-2xl font-extrabold leading-snug">
+      <h2 className="px-1 pt-1 text-center text-xl font-extrabold leading-snug sm:text-2xl">
         {questionText}
       </h2>
 
@@ -568,6 +574,10 @@ function GuessPhase({
           </p>
         </form>
       )}
+
+      {/* Soaks up the leftover height so the content above keeps its place
+          when the keyboard opens, rather than being spread down the screen. */}
+      <div className="flex-1" />
     </div>
   );
 }
