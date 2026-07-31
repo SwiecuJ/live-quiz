@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { card, gradientText, primaryButton, inputBase } from "@/lib/theme";
 import { setRfHostMode } from "@/lib/ryzykfizyk/hostKey";
-import { TOTAL_ROUNDS, START_BALANCE } from "@/lib/ryzykfizyk/betting";
+import { ROUND_OPTIONS, DEFAULT_ROUNDS, START_BALANCE } from "@/lib/ryzykfizyk/betting";
 
 export default function RyzykFizykHome() {
   const router = useRouter();
@@ -13,6 +13,7 @@ export default function RyzykFizykHome() {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [playsToo, setPlaysToo] = useState(false);
+  const [rounds, setRounds] = useState<number>(DEFAULT_ROUNDS);
   const [joinCode, setJoinCode] = useState("");
 
   async function handleCreate() {
@@ -21,7 +22,11 @@ export default function RyzykFizykHome() {
     setCreateError(null);
 
     try {
-      const res = await fetch("/api/rf/rooms", { method: "POST" });
+      const res = await fetch("/api/rf/rooms", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rounds }),
+      });
       const data = await res.json();
       if (!res.ok) {
         setCreateError(data.error ?? "Nie udało się odpalić gry.");
@@ -43,15 +48,16 @@ export default function RyzykFizykHome() {
   }
 
   return (
-    <div className="flex flex-1 flex-col items-center justify-center px-4 py-12">
+    <div className="relative flex flex-1 flex-col items-center justify-center px-4 py-12">
+      <Link
+        href="/"
+        className="absolute right-4 top-4 -rotate-2 rounded-full border-2 border-black bg-lime-300 px-3 py-1.5 text-xs font-black uppercase tracking-wide text-black shadow-[3px_3px_0_0_#000] transition-transform hover:-translate-y-0.5 sm:right-6 sm:top-6 sm:text-sm"
+      >
+        🎪 Quizownia
+      </Link>
+
       <div className="w-full max-w-xl text-center">
-        <Link
-          href="/"
-          className="text-xs font-bold text-white/40 underline underline-offset-4 hover:text-white/70"
-        >
-          ← Quizownia
-        </Link>
-        <span className="mt-4 block">
+        <span className="mt-8 block sm:mt-4">
           <span className="inline-block -rotate-2 rounded-full border-2 border-black bg-amber-300 px-4 py-1 text-xs font-black uppercase tracking-widest text-black shadow-[3px_3px_0_0_#000]">
             Zgaduj i obstawiaj 🎲
           </span>
@@ -85,14 +91,29 @@ export default function RyzykFizykHome() {
           </li>
         </ol>
         <p className="mt-3 text-xs font-medium text-white/40">
-          {TOTAL_ROUNDS} rund, każdy zaczyna z {START_BALANCE}$. Zły typ sam w sobie nic nie kosztuje
-          — tracisz tylko to, co postawisz.
+          Każdy zaczyna z {START_BALANCE}$. Zły typ sam w sobie nic nie kosztuje — tracisz tylko to,
+          co postawisz.
         </p>
       </div>
 
       <div className="mt-6 grid w-full max-w-xl gap-4 sm:grid-cols-2">
         <div className={`flex flex-col gap-3 p-6 ${card}`}>
           <h2 className="text-lg font-black text-white">Odpal grę 🎰</h2>
+
+          <label className="flex flex-col gap-2 text-left text-sm font-semibold text-white/70">
+            Ile rund?
+            <select
+              value={rounds}
+              onChange={(e) => setRounds(Number(e.target.value))}
+              className={inputBase}
+            >
+              {ROUND_OPTIONS.map((n) => (
+                <option key={n} value={n} className="bg-[#0a0a0c]">
+                  {n}
+                </option>
+              ))}
+            </select>
+          </label>
 
           {/* Same shape as Quizownia: showing the board is the default, and
               sitting at the table on the same device is the opt-in. */}

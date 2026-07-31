@@ -760,16 +760,16 @@ function ScreenHostView({
 
   return (
     <div className="flex flex-1 flex-col gap-6 p-6 text-white">
-      <div className="flex items-center justify-between text-lg font-bold text-white/60">
-        <span>{roundLabel}</span>
-        <span>
+      <div className="grid w-full grid-cols-3 items-center gap-2 text-lg font-bold text-white/60">
+        <span className="text-left">{roundLabel}</span>
+        <span className="text-center">
           {room.status === "guessing"
             ? `${guessedThisRound} / ${players.length} wpisało`
             : room.status === "betting"
               ? `${betThisRound} / ${players.length} obstawiło`
               : "Wyniki"}
         </span>
-        <span className="tabular-nums">{remainingSeconds}s</span>
+        <span className="text-right tabular-nums">{remainingSeconds}s</span>
       </div>
 
       <h2 className="px-2 text-center text-3xl font-extrabold leading-snug sm:text-5xl">
@@ -841,12 +841,20 @@ function Centered({ title, message }: { title: string; message: string }) {
   );
 }
 
+/**
+ * `w-full` matters: on screens whose parent centres its children the row
+ * would otherwise shrink to fit, leaving justify-between nothing to spread
+ * and running the round label straight into the clock ("Runda 2/70s").
+ *
+ * Three fixed columns rather than justify-between so the middle cell sits in
+ * the actual centre instead of wherever the widths either side push it.
+ */
 function PhaseHeader({ left, right, note }: { left: string; right: string; note?: string }) {
   return (
-    <div className="flex items-center justify-between text-sm font-bold text-white/60">
-      <span>{left}</span>
-      {note && <span className="text-xs text-white/40">{note}</span>}
-      <span className="tabular-nums">{right}</span>
+    <div className="grid w-full grid-cols-3 items-center gap-2 text-sm font-bold text-white/60">
+      <span className="text-left">{left}</span>
+      <span className="text-center text-xs text-white/40">{note}</span>
+      <span className="text-right tabular-nums">{right}</span>
     </div>
   );
 }

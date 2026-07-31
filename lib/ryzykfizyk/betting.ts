@@ -34,7 +34,9 @@ export const START_BALANCE = 2000;
 export const AUTHOR_BONUS = 300;
 export const BET_AMOUNTS = [100, 200, 300, 400, 500] as const;
 export const MAX_BETS_PER_ROUND = 2;
-export const TOTAL_ROUNDS = 7;
+/** 7 is the length the physical game is built around, so it's the default. */
+export const ROUND_OPTIONS = [5, 7, 10, 15] as const;
+export const DEFAULT_ROUNDS = 7;
 
 export const UNDER_SLOT_KEY = "under";
 /** Long shot: it only pays when the whole table overshot. */
