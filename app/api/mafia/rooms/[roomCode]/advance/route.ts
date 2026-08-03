@@ -60,7 +60,9 @@ export async function POST(
     .order("created_at");
   const players = (playerRows ?? []) as PlayerRow[];
   const alive = players.filter((p) => p.alive);
-  const seed = Math.floor(Math.random() * 1000);
+  // Wide enough to reach the whole space of composed scenes; the narration
+  // splits this one number across three independent beats.
+  const seed = Math.floor(Math.random() * 1_000_000);
 
   const roleMap = async () => {
     const { data } = await supabase
