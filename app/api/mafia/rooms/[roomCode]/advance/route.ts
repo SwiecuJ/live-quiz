@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/server";
-import { dealRoles, checkWinner, MIN_PLAYERS, type MafiaRole } from "@/lib/mafia/roles";
+import {
+  dealRoles,
+  checkWinner,
+  MIN_PLAYERS,
+  BOT_DEVICE_ID,
+  type MafiaRole,
+} from "@/lib/mafia/roles";
 
 export const runtime = "nodejs";
 
@@ -8,7 +14,10 @@ interface PlayerRow {
   id: string;
   nickname: string;
   alive: boolean;
+  device_id: string | null;
 }
+
+const randomOf = <T,>(list: T[]): T => list[Math.floor(Math.random() * list.length)];
 
 /** Most-picked target. A tie means no clear decision, so nothing happens. */
 function tally(rows: { target_id: string | null }[]): string | null {
@@ -55,7 +64,7 @@ export async function POST(
 
   const { data: playerRows } = await supabase
     .from("mf_players")
-    .select("id, nickname, alive")
+    .select("id, nickname, alive, device_id")
     .eq("room_id", room.id)
     .order("created_at");
   const players = (playerRows ?? []) as PlayerRow[];
@@ -72,9 +81,83 @@ export async function POST(
     return new Map((data ?? []).map((r) => [r.player_id, r.role as MafiaRole]));
   };
 
+  /**
+   * Bots don't hold phones, so their choices are made here, at the moment
+   * the phase closes. Anything a human already submitted is left alone.
+   *
+   * Where it matters, bots move as one bloc and fall in behind a human:
+   * mafia who don't agree kill nobody, and a tied vote lynches nobody, so
+   * bots choosing freely would leave a solo tester sitting through night
+   * after night in which nothing happens.
+   */
+  const fillBotChoices = async (
+    table: "mf_actions" | "mf_votes",
+    roles: Map<string, MafiaRole>
+  ) => {
+    const { data: already } = await supabase
+      .from(table)
+      .select("player_id, target_id")
+      .eq("room_id", room.id)
+      .eq("day_number", room.day_number);
+
+    const acted = new Set((already ?? []).map((a) => a.player_id));
+    const idleBots = alive.filter((p) => p.device_id === BOT_DEVICE_ID && !acted.has(p.id));
+    if (idleBots.length === 0) return;
+
+    const isMafia = (id: string) => roles.get(id) === "mafia";
+    const townAlive = alive.filter((p) => !isMafia(p.id));
+    const someoneElse = (bot: PlayerRow) => {
+      const others = alive.filter((p) => p.id !== bot.id);
+      return others.length > 0 ? randomOf(others).id : null;
+    };
+
+    // Whatever a human has already put down this phase: the crew's target at
+    // night, the first vote cast during the day.
+    const humanLead =
+      table === "mf_actions"
+        ? (already ?? []).find((a) => isMafia(a.player_id))?.target_id ?? null
+        : (already ?? [])[0]?.target_id ?? null;
+
+    const pool = table === "mf_actions" ? townAlive : alive;
+    const sharedTarget = humanLead ?? (pool.length > 0 ? randomOf(pool).id : null);
+
+    const rows = idleBots.map((bot) => {
+      // Mafia agree on the kill; the town piles onto one name at the vote.
+      // Everyone else at night is just tapping to look busy.
+      const follows = table === "mf_votes" || isMafia(bot.id);
+      const target =
+        follows && sharedTarget && sharedTarget !== bot.id ? sharedTarget : someoneElse(bot);
+      return {
+        room_id: room.id,
+        player_id: bot.id,
+        day_number: room.day_number,
+        target_id: target,
+      };
+    });
+
+    const { error } = await supabase.from(table).upsert(rows, { onConflict: "player_id,day_number" });
+    if (error) console.error("mafia: failed to fill bot choices", error);
+  };
+
+  /** Once it's over there's nothing left to protect, so every card goes face
+   *  up -- otherwise the survivors, mafia included, stay a mystery forever
+   *  and the last thing the table wants to know goes unanswered. */
+  const revealEveryone = async (roles: Map<string, MafiaRole>) => {
+    await Promise.all(
+      players
+        .filter((p) => roles.get(p.id))
+        .map((p) =>
+          supabase.from("mf_players").update({ revealed_role: roles.get(p.id) }).eq("id", p.id)
+        )
+    );
+  };
+
   const settleWinner = async (roles: Map<string, MafiaRole>, stillAlive: PlayerRow[]) => {
     const aliveMafia = stillAlive.filter((p) => roles.get(p.id) === "mafia").length;
-    return checkWinner(aliveMafia, stillAlive.length - aliveMafia);
+    const winner = checkWinner(aliveMafia, stillAlive.length - aliveMafia);
+    // Before the status flips: the recap renders the moment it does.
+    if (winner) await revealEveryone(roles);
+    return winner;
   };
 
   // ---- lobby -> role_reveal: deal the cards ------------------------------
@@ -137,6 +220,7 @@ export async function POST(
   // ---- noc -> dzien: someone doesn't wake up -----------------------------
   if (room.status === "noc") {
     const roles = await roleMap();
+    await fillBotChoices("mf_actions", roles);
     const { data: actions } = await supabase
       .from("mf_actions")
       .select("player_id, target_id")
@@ -202,6 +286,7 @@ export async function POST(
   // ---- glosowanie -> wynik: the town passes judgement --------------------
   if (room.status === "glosowanie") {
     const roles = await roleMap();
+    await fillBotChoices("mf_votes", roles);
     const { data: votes } = await supabase
       .from("mf_votes")
       .select("player_id, target_id")

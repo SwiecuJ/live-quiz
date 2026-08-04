@@ -11,6 +11,9 @@ export type MafiaRole = "mafia" | "detektyw" | "lekarz" | "mieszkaniec";
 export const MIN_PLAYERS = 6;
 export const MAX_PLAYERS = 20;
 
+/** Marks a seat filled by the app rather than a person. */
+export const BOT_DEVICE_ID = "bot";
+
 export interface RoleCounts {
   mafia: number;
   detektyw: number;
@@ -18,9 +21,18 @@ export interface RoleCounts {
   mieszkaniec: number;
 }
 
-/** Rounds to the nearest quarter of the table, never fewer than one. */
+/**
+ * One mafioso per three and a half players: one up to six, two through ten,
+ * three from eleven, and so on -- the split most tables use.
+ *
+ * A quarter of the table reads like the same thing, but it rounds six up to
+ * two, and two out of six is a rout. The town loses on the first day unless
+ * it lynches a mafioso straight away, which at six players is a coin flip:
+ * played out, the town wins about one game in eight. At one mafioso it gets
+ * two real chances instead.
+ */
 export function mafiaCountFor(players: number): number {
-  return Math.max(1, Math.round(players / 4));
+  return Math.max(1, Math.floor(players / 3.5));
 }
 
 export function rolesFor(players: number): RoleCounts {

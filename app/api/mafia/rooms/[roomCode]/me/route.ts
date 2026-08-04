@@ -61,14 +61,24 @@ export async function POST(
     myPick: string | null;
   } = { role, allies: [], findings: [], allyPicks: [], myPick: null };
 
-  // What this player has already chosen tonight, so a reload doesn't lose it.
-  const { data: ownAction } = await supabase
-    .from("mf_actions")
-    .select("target_id")
-    .eq("player_id", playerId)
-    .eq("day_number", room.day_number)
-    .maybeSingle();
-  response.myPick = ownAction?.target_id ?? null;
+  // What this player has already chosen in the phase that's currently open,
+  // so a reload doesn't lose it.
+  //
+  // It has to follow the phase. Reading the night table during the vote hands
+  // back last night's target, the screen takes that for a vote already cast,
+  // and every button locks -- so nobody can vote and the town lynches nobody,
+  // night after night.
+  const pickTable =
+    room.status === "noc" ? "mf_actions" : room.status === "glosowanie" ? "mf_votes" : null;
+  if (pickTable) {
+    const { data: ownPick } = await supabase
+      .from(pickTable)
+      .select("target_id")
+      .eq("player_id", playerId)
+      .eq("day_number", room.day_number)
+      .maybeSingle();
+    response.myPick = ownPick?.target_id ?? null;
+  }
 
   if (role === "mafia") {
     const { data: allySecrets } = await supabase

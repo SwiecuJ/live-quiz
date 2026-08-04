@@ -18,6 +18,7 @@ import { getDeviceId, getSavedNickname, saveNickname } from "@/lib/identity";
 import { getRfHostMode, setRfHostMode } from "@/lib/ryzykfizyk/hostKey";
 import {
   MIN_PLAYERS,
+  BOT_DEVICE_ID,
   ROLE_LABEL,
   ROLE_EMOJI,
   ROLE_DESCRIPTION,
@@ -95,7 +96,11 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
   const [actionError, setActionError] = useState<string | null>(null);
   // Keyed by day so a new night starts blank without an effect resetting it.
   const [pickedByDay, setPickedByDay] = useState<Record<string, string>>({});
-  const [progress, setProgress] = useState<{ acted: number; alive: number } | null>(null);
+  const [progress, setProgress] = useState<{
+    phase: string;
+    acted: number;
+    alive: number;
+  } | null>(null);
 
   const loadedRoleKeyRef = useRef<string | null>(null);
 
@@ -189,7 +194,12 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
   }, [isNight, amMafia, creds, refreshMe]);
 
   // ---- how many have acted ---------------------------------------------
-  const countingPhase = room?.status === "noc" || room?.status === "glosowanie";
+  // Every phase the table waits on people to tap something -- including the
+  // reveal, which otherwise sat on "Rozdanie" and needed the host to notice
+  // that everyone had finished reading.
+  const countingPhase =
+    room?.status === "role_reveal" || room?.status === "noc" || room?.status === "glosowanie";
+  const phaseKey = room ? `${room.status}-${room.day_number}` : null;
   useEffect(() => {
     if (!countingPhase) return;
     let cancelled = false;
@@ -197,7 +207,7 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
       fetch(`/api/mafia/rooms/${roomCode}/progress`)
         .then((r) => r.json())
         .then((d) => {
-          if (!cancelled && typeof d.acted === "number") setProgress(d);
+          if (!cancelled && typeof d.acted === "number" && d.phase) setProgress(d);
         })
         .catch(() => {});
     };
@@ -209,7 +219,9 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [countingPhase, room?.day_number, roomCode]);
+    // Keyed on the phase, not just the day: night and vote share a day
+    // number, and the fresh count has to arrive with the new phase.
+  }, [countingPhase, phaseKey, roomCode]);
 
   /** Just the request. Kept free of state so the auto-advance effect below
    *  doesn't have to touch React state on its way out of a phase. */
@@ -234,9 +246,10 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
   // by phase so a repeat can't skip the next one; the server also refuses a
   // transition out of a phase it has already left.
   const autoAdvancedRef = useRef<string | null>(null);
-  const phaseKey = room ? `${room.status}-${room.day_number}` : null;
-  const everyoneActed =
-    !!progress && progress.alive > 0 && progress.acted >= progress.alive && countingPhase;
+  // Counts from the phase we're actually in. A leftover "everyone's done"
+  // from the night would otherwise close the vote the instant it opened.
+  const live = progress && progress.phase === phaseKey ? progress : null;
+  const everyoneActed = !!live && live.alive > 0 && live.acted >= live.alive && countingPhase;
   useEffect(() => {
     if (!isHost || !everyoneActed || !phaseKey) return;
     if (autoAdvancedRef.current === phaseKey) return;
@@ -268,6 +281,24 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
     const fresh = JSON.stringify({ playerId: data.playerId, secret: data.secret });
     localStorage.setItem(credsKey(roomCode), fresh);
     setJoinedCredsRaw(fresh);
+  }
+
+  /** Seats stand-ins so one person can run a whole game alone. They pick at
+   *  night and vote during the day; the lobby list refreshes over realtime. */
+  async function addBots(count: number) {
+    if (busy) return;
+    setBusy(true);
+    setActionError(null);
+    const res = await fetch(`/api/mafia/rooms/${roomCode}/bots`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ count }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setActionError(data.error ?? "Nie udało się dosadzić.");
+    }
+    setBusy(false);
   }
 
   async function pick(targetId: string) {
@@ -377,9 +408,13 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
               {players.map((p) => (
                 <span
                   key={p.id}
-                  className="rounded-full border-2 border-black bg-white px-3 py-1.5 text-sm font-bold text-black shadow-[3px_3px_0_0_#000]"
+                  className={`rounded-full border-2 border-black px-3 py-1.5 text-sm font-bold shadow-[3px_3px_0_0_#000] ${
+                    p.device_id === BOT_DEVICE_ID
+                      ? "bg-white/40 text-black/60"
+                      : "bg-white text-black"
+                  }`}
                 >
-                  {avatarFor(p.id)} {p.nickname}
+                  {p.device_id === BOT_DEVICE_ID ? "🤖" : avatarFor(p.id)} {p.nickname}
                 </span>
               ))}
             </div>
@@ -408,6 +443,19 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
                 {MIN_PLAYERS}.
               </p>
             )}
+            {/* Six phones is a lot to borrow just to check that it works. */}
+            <button
+              onClick={() => addBots(Math.max(1, MIN_PLAYERS - players.length))}
+              disabled={busy}
+              className="text-xs font-bold text-white/40 underline underline-offset-4"
+            >
+              {players.length < MIN_PLAYERS
+                ? `Nie ma kompletu? Dosadź ${MIN_PLAYERS - players.length} × 🤖`
+                : "Dosadź jeszcze jednego 🤖"}
+            </button>
+            <p className="-mt-3 text-[11px] text-white/25">
+              Boty grają same — dobre na próbę, kiepskie na domówkę.
+            </p>
           </>
         ) : (
           <button
@@ -431,7 +479,7 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
     return (
       <div className="flex flex-1 flex-col gap-4 p-4 text-white">
         <p className="text-center text-xs font-bold uppercase tracking-widest text-white/40">
-          {progress ? `${progress.acted} / ${progress.alive} przeczytało` : "Rozdanie"}
+          {live ? `${live.acted} / ${live.alive} przeczytało` : "Rozdanie"}
         </p>
 
         <div className={`whitespace-pre-line p-5 text-center text-sm leading-relaxed ${card}`}>
@@ -517,7 +565,7 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
             ))}
           </ul>
           <p className="mt-3 text-[11px] text-white/30">
-            Role żywych pokazujemy tylko tym, którzy zginęli w trakcie — reszta wyszła na jaw teraz.
+            Koniec gry — wszystkie karty na stół.
           </p>
         </div>
         {isHost && (
@@ -533,7 +581,7 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
     <div className="grid w-full grid-cols-3 items-center gap-2 text-sm font-bold text-white/60">
       <span className="text-left">Dzień {room.day_number}</span>
       <span className="text-center text-xs text-white/40">
-        {progress ? `${progress.acted} / ${progress.alive} gotowych` : ""}
+        {live ? `${live.acted} / ${live.alive} gotowych` : ""}
       </span>
       <span className="text-right">{alive.length} żywych</span>
     </div>
@@ -701,6 +749,10 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
             )}
           </>
         )}
+
+        {/* The vote can't wait on someone who's gone to the kitchen -- and
+            with a host who's already dead there's nobody left to close it. */}
+        <div className="mt-auto pt-2 text-center">{nextButton("zamykamy głosowanie ⚖️")}</div>
       </div>
     );
   }

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/server";
+import { BOT_DEVICE_ID } from "@/lib/mafia/roles";
 
 export const runtime = "nodejs";
 
@@ -7,6 +8,16 @@ export const runtime = "nodejs";
  * How many of the living have acted this phase -- counts only, never who or
  * on whom. The night table can't be public (the picks are the mystery), but
  * "4 z 7 gotowych" gives the table a pulse without leaking anything.
+ *
+ * Bots are left out of both sides of the ratio. They don't tap -- their
+ * choices are made for them when the phase closes -- so counting them would
+ * mean the phase could never reach "everyone's done" and would hang waiting
+ * for players who aren't there.
+ *
+ * The counts come back stamped with the phase they were measured in. A count
+ * that outlives its phase is worse than no count at all: "everyone has acted"
+ * left over from the night would slam the vote shut before a single person
+ * could cast one.
  */
 export async function GET(
   _req: Request,
@@ -23,20 +34,25 @@ export async function GET(
 
   if (!room) return NextResponse.json({ error: "Nie ma takiego miasta." }, { status: 404 });
 
-  const { count: alive } = await supabase
+  const phase = `${room.status}-${room.day_number}`;
+  const humans = <T extends { device_id: string | null }>(rows: T[] | null) =>
+    (rows ?? []).filter((p) => p.device_id !== BOT_DEVICE_ID).length;
+
+  const { data: aliveRows } = await supabase
     .from("mf_players")
-    .select("id", { count: "exact", head: true })
+    .select("id, device_id")
     .eq("room_id", room.id)
     .eq("alive", true);
+  const alive = humans(aliveRows);
 
   // During the reveal "acted" means "has looked at their card".
   if (room.status === "role_reveal") {
-    const { count: ready } = await supabase
+    const { data: readyRows } = await supabase
       .from("mf_players")
-      .select("id", { count: "exact", head: true })
+      .select("id, device_id")
       .eq("room_id", room.id)
       .eq("ready", true);
-    return NextResponse.json({ acted: ready ?? 0, alive: alive ?? 0 });
+    return NextResponse.json({ phase, acted: humans(readyRows), alive });
   }
 
   const table = room.status === "noc" ? "mf_actions" : "mf_votes";
@@ -46,5 +62,5 @@ export async function GET(
     .eq("room_id", room.id)
     .eq("day_number", room.day_number);
 
-  return NextResponse.json({ acted: acted ?? 0, alive: alive ?? 0 });
+  return NextResponse.json({ phase, acted: acted ?? 0, alive });
 }
