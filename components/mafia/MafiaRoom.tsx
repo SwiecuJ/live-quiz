@@ -94,8 +94,15 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
 
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  // Keyed by day so a new night starts blank without an effect resetting it.
+  // Both keyed by phase so a new night starts blank without an effect
+  // resetting it. Tapping a name only fills `selected` -- that has to feel
+  // instant -- and nothing reaches the server until the choice is confirmed.
+  const [selectedByPhase, setSelectedByPhase] = useState<Record<string, string>>({});
   const [pickedByDay, setPickedByDay] = useState<Record<string, string>>({});
+  const [votesShown, setVotesShown] = useState<{
+    phase: string;
+    rows: { player_id: string; target_id: string | null }[];
+  } | null>(null);
   const [progress, setProgress] = useState<{
     phase: string;
     acted: number;
@@ -223,6 +230,29 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
     // number, and the fresh count has to arrive with the new phase.
   }, [countingPhase, phaseKey, roomCode]);
 
+  // ---- who voted for whom ----------------------------------------------
+  // Lynch votes are cast out loud at a real table, so the town gets to see
+  // the tally afterwards -- who backed whom is half the argument for the
+  // next day. Night picks are never published this way.
+  const verdictPhase = room?.status === "wynik" || room?.status === "koniec";
+  const roomId = room?.id;
+  const dayNumber = room?.day_number;
+  useEffect(() => {
+    if (!verdictPhase || !roomId || dayNumber === undefined || !phaseKey) return;
+    let cancelled = false;
+    supabase
+      .from("mf_votes")
+      .select("player_id, target_id")
+      .eq("room_id", roomId)
+      .eq("day_number", dayNumber)
+      .then(({ data }) => {
+        if (!cancelled && data) setVotesShown({ phase: phaseKey, rows: data });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [verdictPhase, roomId, dayNumber, phaseKey]);
+
   /** Just the request. Kept free of state so the auto-advance effect below
    *  doesn't have to touch React state on its way out of a phase. */
   const postAdvance = useCallback(
@@ -301,7 +331,8 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
     setBusy(false);
   }
 
-  async function pick(targetId: string) {
+  /** The one request a choice costs, sent when it's confirmed. */
+  async function submitPick(targetId: string) {
     if (!creds || !room || busy) return;
     setBusy(true);
     setActionError(null);
@@ -331,7 +362,13 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
   const amAlive = myPlayer?.alive ?? false;
   // Falls back to the server's copy so a reload mid-night doesn't look like
   // you never picked.
-  const picked = pickedByDay[`${room.status}-${room.day_number}`] ?? me?.myPick ?? undefined;
+  const phaseSlot = `${room.status}-${room.day_number}`;
+  const picked = pickedByDay[phaseSlot] ?? me?.myPick ?? undefined;
+  // What the tile shows as chosen: your last tap if you've tapped, otherwise
+  // whatever is already locked in.
+  const selected = selectedByPhase[phaseSlot] ?? picked;
+  const selectedPlayer = players.find((p) => p.id === selected);
+  const needsConfirming = !!selected && selected !== picked;
 
   /** Takes over running the game and moves it on, so a table whose host
    *  device was never marked can't get stranded mid-phase. */
@@ -526,7 +563,7 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
               </p>
             ) : (
               <button
-                onClick={() => pick(creds!.playerId)}
+                onClick={() => submitPick(creds!.playerId)}
                 disabled={busy}
                 className={primaryButton + " text-lg"}
               >
@@ -588,6 +625,9 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
             Koniec gry — wszystkie karty na stół.
           </p>
         </div>
+        {votesShown?.phase === phaseKey && (
+          <VoteBreakdown players={players} rows={votesShown.rows} />
+        )}
         {isHost && (
           <Link href="/mafia" className={primaryButton + " mt-2 text-lg"}>
             Nowe miasto 🔁
@@ -597,21 +637,27 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
     );
   }
 
-  const dayHeader = (
-    <div className="grid w-full grid-cols-3 items-center gap-2 text-sm font-bold text-white/60">
-      <span className="text-left">Dzień {room.day_number}</span>
-      <span className="text-center text-xs text-white/40">
-        {live ? `${live.acted} / ${live.alive} gotowych` : ""}
-      </span>
-      <span className="text-right">{alive.length} żywych</span>
-    </div>
+  /** Header plus the sky behind it. The sky is fixed-position, so it doesn't
+   *  matter where in the tree it sits -- riding along with the header means
+   *  every phase that has a header gets the right time of day for free. */
+  const phaseChrome = (
+    <>
+      <PhaseSky night={room.status === "noc"} />
+      <div className="grid w-full grid-cols-3 items-center gap-2 text-sm font-bold text-white/60">
+        <span className="text-left">Dzień {room.day_number}</span>
+        <span className="text-center text-xs text-white/40">
+          {live ? `${live.acted} / ${live.alive} gotowych` : ""}
+        </span>
+        <span className="text-right">{alive.length} żywych</span>
+      </div>
+    </>
   );
 
   // ---- night ------------------------------------------------------------
   if (room.status === "noc") {
     return (
       <div className="flex flex-1 flex-col gap-3 p-4 text-white">
-        {dayHeader}
+        {phaseChrome}
         <p className="text-center text-4xl">🌙</p>
         <p className="whitespace-pre-line text-center text-sm italic leading-relaxed text-white/50">
           {nightfallScene(room.day_number)}
@@ -660,31 +706,34 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
               {me?.role ? ROLE_NIGHT_PROMPT[me.role] : "Wybierz kogoś"}
             </p>
 
-            <div className="grid grid-cols-2 gap-2">
-              {alive
-                .filter((p) => p.id !== creds?.playerId)
-                .map((p) => (
-                  <button
-                    key={p.id}
-                    onClick={() => pick(p.id)}
-                    /* Changeable until the night closes: the crew has to be
-                       able to move onto whoever the others settled on. */
-                    disabled={busy}
-                    className={`rounded-2xl border-2 px-3 py-4 text-sm font-black transition-all ${
-                      picked === p.id
-                        ? "border-black bg-rose-400 text-black shadow-[4px_4px_0_0_#000]"
-                        : "border-white/15 bg-white/5 text-white/80"
-                    }`}
-                  >
-                    <span className="block text-xl">{avatarFor(p.id)}</span>
-                    {p.nickname}
-                  </button>
-                ))}
-            </div>
+            {/* Yourself included. The mafia's best bluff is to send the town
+                after one of their own, and a night in which everybody can be
+                picked is also a night in which nobody's taps stand out. */}
+            <ChoiceGrid
+              people={alive}
+              selected={selected}
+              meId={creds?.playerId}
+              onSelect={(id) => setSelectedByPhase((prev) => ({ ...prev, [phaseSlot]: id }))}
+            />
 
-            {picked && (
-              <p className="text-center text-xs font-bold text-white/50">
-                Wybrane — możesz jeszcze zmienić zdanie. Czekamy na resztę…
+            {needsConfirming ? (
+              <button
+                onClick={() => submitPick(selected!)}
+                disabled={busy}
+                className={primaryButton + " text-base"}
+              >
+                {busy ? "Zapisuję…" : `Potwierdzam: ${selectedPlayer?.nickname ?? ""} 🔒`}
+              </button>
+            ) : (
+              picked && (
+                <p className="text-center text-xs font-bold text-white/50">
+                  Zapisane — możesz jeszcze zmienić zdanie. Czekamy na resztę…
+                </p>
+              )
+            )}
+            {!selected && (
+              <p className="text-center text-xs text-white/30">
+                Stuknij w kogoś, potem potwierdź.
               </p>
             )}
             {actionError && (
@@ -713,7 +762,7 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
 
     return (
       <div className="flex flex-1 flex-col gap-4 p-4 text-white">
-        {dayHeader}
+        {phaseChrome}
         <p className="text-center text-4xl">🌅</p>
         <div className={`p-5 text-center ${card}`}>
           <p className="whitespace-pre-line text-base font-bold leading-relaxed">{story}</p>
@@ -734,7 +783,7 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
   if (room.status === "glosowanie") {
     return (
       <div className="flex flex-1 flex-col gap-3 p-4 text-white">
-        {dayHeader}
+        {phaseChrome}
         <p className="text-center text-sm font-black">Kogo wyrzucamy z miasta?</p>
 
         {!iAmPlayer || !amAlive ? (
@@ -745,26 +794,30 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-2 gap-2">
-              {alive.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => pick(p.id)}
-                  disabled={busy || !!picked}
-                  className={`rounded-2xl border-2 px-3 py-4 text-sm font-black transition-all ${
-                    picked === p.id
-                      ? "border-black bg-rose-400 text-black shadow-[4px_4px_0_0_#000]"
-                      : "border-white/15 bg-white/5 text-white/80"
-                  } ${picked && picked !== p.id ? "opacity-30" : ""}`}
-                >
-                  <span className="block text-xl">{avatarFor(p.id)}</span>
-                  {p.nickname}
-                </button>
-              ))}
-            </div>
-            {picked && (
+            <ChoiceGrid
+              people={alive}
+              selected={selected}
+              meId={creds?.playerId}
+              // The vote is final once cast, so the grid greys out rather
+              // than staying live like it does at night.
+              locked={!!picked}
+              onSelect={(id) => setSelectedByPhase((prev) => ({ ...prev, [phaseSlot]: id }))}
+            />
+            {picked ? (
               <p className="text-center text-xs font-bold text-white/50">
                 Zagłosowane. Czekamy na resztę…
+              </p>
+            ) : needsConfirming ? (
+              <button
+                onClick={() => submitPick(selected!)}
+                disabled={busy}
+                className={primaryButton + " text-base"}
+              >
+                {busy ? "Zapisuję…" : `Głosuję: ${selectedPlayer?.nickname ?? ""} ⚖️`}
+              </button>
+            ) : (
+              <p className="text-center text-xs text-white/30">
+                Stuknij w kogoś, potem potwierdź. Głosu nie da się cofnąć.
               </p>
             )}
             {actionError && (
@@ -791,7 +844,7 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
 
   return (
     <div className="flex flex-1 flex-col gap-4 p-4 text-white">
-      {dayHeader}
+      {phaseChrome}
       <p className="text-center text-4xl">⚖️</p>
       <div className={`p-5 text-center ${card}`}>
         <p className="whitespace-pre-line text-base font-bold leading-relaxed">{verdict}</p>
@@ -802,11 +855,131 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
           </p>
         )}
       </div>
+      {votesShown?.phase === phaseKey && (
+        <VoteBreakdown players={players} rows={votesShown.rows} />
+      )}
       <AliveList players={alive} dead={dead} />
       {nextButton("Zapada noc 🌙")}
       {actionError && (
         <p className="text-center text-sm font-semibold text-rose-400">{actionError}</p>
       )}
+    </div>
+  );
+}
+
+/**
+ * Warm and lit by day, cold and dark at night, crossfading between the two.
+ *
+ * Everything on top of it is white text on dark cards, so "day" can't
+ * actually be a bright sky -- it's the warm end of dark against the cold
+ * end, which reads as unmistakably a different time of day while leaving
+ * every screen as legible as it was.
+ */
+function PhaseSky({ night }: { night: boolean }) {
+  return (
+    <div className="pointer-events-none fixed inset-0 -z-[9] overflow-hidden bg-[#05060f]">
+      <div
+        className={`absolute inset-0 transition-opacity duration-[1200ms] ${
+          night ? "opacity-0" : "opacity-100"
+        }`}
+        style={{ background: "linear-gradient(180deg,#2a1c0e 0%,#48301a 55%,#6b4720 100%)" }}
+      />
+      {/* Sun and moon share a corner; only one of them is ever visible. */}
+      <div
+        className={`absolute right-[-4rem] top-[-4rem] h-72 w-72 rounded-full blur-[70px] transition-opacity duration-[1200ms] ${
+          night ? "opacity-0" : "opacity-90"
+        }`}
+        style={{ background: "radial-gradient(circle,#ffd27a 0%,#ff9d3c 45%,transparent 70%)" }}
+      />
+      <div
+        className={`absolute right-[-3rem] top-[-3rem] h-64 w-64 rounded-full blur-[80px] transition-opacity duration-[1200ms] ${
+          night ? "opacity-70" : "opacity-0"
+        }`}
+        style={{ background: "radial-gradient(circle,#c8d4ff 0%,#4a5aa8 50%,transparent 72%)" }}
+      />
+      <div
+        className={`absolute inset-x-0 bottom-0 h-1/2 transition-opacity duration-[1200ms] ${
+          night ? "opacity-100" : "opacity-0"
+        }`}
+        style={{ background: "linear-gradient(180deg,transparent 0%,#0a0b1c 100%)" }}
+      />
+    </div>
+  );
+}
+
+/**
+ * The names you can act on. Tapping one is local and instant -- the request
+ * only goes out when the choice is confirmed, so the grid never waits on the
+ * network to show what you pressed.
+ */
+function ChoiceGrid({
+  people,
+  selected,
+  meId,
+  locked = false,
+  onSelect,
+}: {
+  people: MfPlayer[];
+  selected?: string;
+  meId?: string;
+  locked?: boolean;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-2">
+      {people.map((p) => (
+        <button
+          key={p.id}
+          onClick={() => !locked && onSelect(p.id)}
+          disabled={locked}
+          className={`rounded-2xl border-2 px-3 py-4 text-sm font-black transition-transform active:scale-95 ${
+            selected === p.id
+              ? "border-black bg-rose-400 text-black shadow-[4px_4px_0_0_#000]"
+              : "border-white/15 bg-white/5 text-white/80"
+          } ${locked && selected !== p.id ? "opacity-30" : ""}`}
+        >
+          <span className="block text-xl">{avatarFor(p.id)}</span>
+          {p.nickname}
+          {p.id === meId && <span className="block text-[10px] font-bold opacity-50">to Ty</span>}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Who backed whom in the lynch vote, once it's over. */
+function VoteBreakdown({
+  players,
+  rows,
+}: {
+  players: MfPlayer[];
+  rows: { player_id: string; target_id: string | null }[];
+}) {
+  const byId = new Map(players.map((p) => [p.id, p]));
+  const groups = new Map<string, string[]>();
+  for (const row of rows) {
+    if (!row.target_id) continue;
+    const voter = byId.get(row.player_id)?.nickname ?? "?";
+    groups.set(row.target_id, [...(groups.get(row.target_id) ?? []), voter]);
+  }
+  if (groups.size === 0) return null;
+
+  const sorted = [...groups.entries()].sort((a, b) => b[1].length - a[1].length);
+  return (
+    <div className={`w-full p-4 ${card}`}>
+      <p className="mb-2 text-sm font-black text-white/70">Kto na kogo głosował</p>
+      <ul className="flex flex-col gap-2">
+        {sorted.map(([targetId, voters]) => (
+          <li key={targetId} className="flex items-start gap-2 text-sm">
+            <span className="font-black">
+              {avatarFor(targetId)} {byId.get(targetId)?.nickname ?? "?"}
+            </span>
+            <span className="text-white/25">←</span>
+            <span className="text-white/55">{voters.join(", ")}</span>
+            <span className="ml-auto shrink-0 font-black text-white/70">{voters.length}</span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
