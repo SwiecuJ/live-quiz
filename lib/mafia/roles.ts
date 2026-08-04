@@ -103,7 +103,7 @@ export const ROLE_NIGHT_PROMPT: Record<MafiaRole, string> = {
 };
 
 export const ROLE_DESCRIPTION: Record<MafiaRole, string> = {
-  mafia: "Nocą wybieracie ofiarę. W dzień udawaj, że nic nie wiesz.",
+  mafia: "W nocy razem z resztą mafii wybieracie ofiarę. W dzień siedzisz cicho i dziwisz się razem z innymi.",
   detektyw: "Co noc sprawdzasz jedną osobę i dowiadujesz się, czy to mafia.",
   lekarz: "Co noc chronisz jedną osobę. Jeśli trafisz na cel mafii — przeżyje.",
   mieszkaniec: "Nie masz mocy. Masz przeczucie, głos i gadane.",

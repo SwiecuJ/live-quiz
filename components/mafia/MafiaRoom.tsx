@@ -341,9 +341,20 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
     advance();
   };
 
-  const nextButton = (label: string) =>
+  /** `quiet` renders it as a line of small print instead of a big button --
+   *  for screens where the player already has one obvious thing to press and
+   *  a second button of equal weight just raises the question of which. */
+  const nextButton = (label: string, quiet = false) =>
     isHost ? (
-      <button onClick={advance} disabled={busy} className={primaryButton + " text-lg"}>
+      <button
+        onClick={advance}
+        disabled={busy}
+        className={
+          quiet
+            ? "text-sm font-bold text-white/40 underline underline-offset-4"
+            : primaryButton + " text-lg"
+        }
+      >
         {label}
       </button>
     ) : (
@@ -352,7 +363,7 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
         disabled={busy}
         className="text-sm font-bold text-white/40 underline underline-offset-4"
       >
-        Nikt nie klika? Przejmij prowadzenie — {label}
+        Nikt nie klika? Przejmij prowadzenie
       </button>
     );
   const joinUrl =
@@ -511,7 +522,7 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
 
             {iAmReady ? (
               <p className="text-center text-sm font-bold text-white/50">
-                Wiesz już, kim jesteś. Czekamy na resztę…
+                Schowaj telefon. Czekamy na resztę…
               </p>
             ) : (
               <button
@@ -519,7 +530,7 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
                 disabled={busy}
                 className={primaryButton + " text-lg"}
               >
-                Wiem, kim jestem 👍
+                Zapamiętane, chowam telefon 👍
               </button>
             )}
           </>
@@ -528,7 +539,16 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
         {actionError && (
           <p className="text-center text-sm font-semibold text-rose-400">{actionError}</p>
         )}
-        {nextButton("gasimy światła 🌙")}
+
+        {/* Only once this player has read their own card. Two big buttons at
+            the same time -- "I know who I am" next to "lights out" -- read as
+            a choice between two things, and it isn't one: the first is yours,
+            the second happens by itself when the last person has tapped. */}
+        {(!iAmPlayer || iAmReady) && (
+          <div className="mt-auto pt-2 text-center">
+            {nextButton("Wszyscy już wiedzą? Gasimy światła 🌙", true)}
+          </div>
+        )}
       </div>
     );
   }
@@ -674,7 +694,9 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
         )}
 
         {/* Someone always forgets to tap; the night mustn't hang on them. */}
-        <div className="mt-auto pt-2 text-center">{nextButton("kończymy noc 🌅")}</div>
+        <div className="mt-auto pt-2 text-center">
+          {nextButton("Wszyscy kliknęli? Kończymy noc 🌅", true)}
+        </div>
       </div>
     );
   }
@@ -697,7 +719,8 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
           <p className="whitespace-pre-line text-base font-bold leading-relaxed">{story}</p>
           {ev?.victimName && !ev.saved && ev.victimRole && (
             <p className="mt-3 text-sm text-white/60">
-              {ev.victimName} był(a): {ROLE_EMOJI[ev.victimRole]} {ROLE_LABEL[ev.victimRole]}
+              Karta odkryta: {ev.victimName} — {ROLE_EMOJI[ev.victimRole]}{" "}
+              {ROLE_LABEL[ev.victimRole]}
             </p>
           )}
         </div>
@@ -752,7 +775,9 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
 
         {/* The vote can't wait on someone who's gone to the kitchen -- and
             with a host who's already dead there's nobody left to close it. */}
-        <div className="mt-auto pt-2 text-center">{nextButton("zamykamy głosowanie ⚖️")}</div>
+        <div className="mt-auto pt-2 text-center">
+          {nextButton("Wszyscy zagłosowali? Zamykamy głosowanie ⚖️", true)}
+        </div>
       </div>
     );
   }
@@ -772,7 +797,8 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
         <p className="whitespace-pre-line text-base font-bold leading-relaxed">{verdict}</p>
         {ev?.victimName && ev.victimRole && (
           <p className="mt-3 text-sm text-white/60">
-            {ev.victimName} był(a): {ROLE_EMOJI[ev.victimRole]} {ROLE_LABEL[ev.victimRole]}
+            Karta odkryta: {ev.victimName} — {ROLE_EMOJI[ev.victimRole]}{" "}
+            {ROLE_LABEL[ev.victimRole]}
           </p>
         )}
       </div>
