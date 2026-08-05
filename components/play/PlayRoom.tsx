@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useRef, useState, useSyncExternalStore, FormEvent } from "react";
 import { useRouter } from "next/navigation";
@@ -6,7 +6,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { supabase } from "@/lib/supabase/client";
 import { useGameDriver } from "@/lib/useGameDriver";
 import { ANSWER_STYLES } from "@/lib/answerStyles";
-import { avatarFor } from "@/lib/avatar";
+import { avatarsFor } from "@/lib/avatar";
 import { card, gradientText, primaryButton, inputBase } from "@/lib/theme";
 import { isMarkedHost, markAsHost } from "@/lib/hostStorage";
 import { getDeviceId, getSavedNickname, saveNickname } from "@/lib/identity";
@@ -436,7 +436,7 @@ export default function PlayRoom({ roomCode }: { roomCode: string }) {
     return (
       <FinalView
         nickname={player.nickname}
-        avatar={avatarFor(player.id)}
+        avatar={avatarsFor(players.map((p) => p.id))(player.id)}
         rank={rank || null}
         totalScore={totalScore}
         isHost={isHost}
@@ -518,6 +518,8 @@ function HostLobbyView({
   starting: boolean;
   onStart: () => void;
 }) {
+  const avatar = avatarsFor(players.map((p) => p.id));
+
   return (
     <div className="flex flex-1 flex-col items-center gap-5 p-5 text-center text-white">
       <p className="text-sm font-bold text-white/60">Pokaż im ten kod 👇</p>
@@ -542,7 +544,7 @@ function HostLobbyView({
                 key={p.id}
                 className="rounded-full border-2 border-black bg-white px-3 py-1.5 text-sm font-bold text-black shadow-[3px_3px_0_0_#000]"
               >
-                {avatarFor(p.id)} {p.nickname}
+                {avatar(p.id)} {p.nickname}
               </span>
             ))}
           </div>
@@ -572,10 +574,12 @@ function WaitingView({
   players: Player[];
   onClaimHost: () => void;
 }) {
+  const avatar = avatarsFor(players.map((p) => p.id));
+
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-4 p-6 text-center text-white">
       <h1 className="text-2xl font-black">
-        {avatarFor(player.id)} {player.nickname}!
+        {avatar(player.id)} {player.nickname}!
       </h1>
       <p className="text-white/60">Czekaj na start, zaraz się zaczyna 🔥</p>
 
@@ -587,7 +591,7 @@ function WaitingView({
               key={p.id}
               className="rounded-full border-2 border-black bg-white px-3 py-1.5 text-sm font-bold text-black shadow-[3px_3px_0_0_#000]"
             >
-              {avatarFor(p.id)} {p.nickname}
+              {avatar(p.id)} {p.nickname}
             </span>
           ))}
         </div>
@@ -774,6 +778,7 @@ function FinalView({
 }) {
   const router = useRouter();
   const medals = ["🥇", "🥈", "🥉"];
+  const avatarOf = avatarsFor(players.map((p) => p.id));
 
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-4 p-6 text-center text-white">
@@ -798,7 +803,7 @@ function FinalView({
                 className="flex justify-between rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm"
               >
                 <span>
-                  {medals[i] ?? `${i + 1}.`} {avatarFor(p.id)} {p.nickname}
+                  {medals[i] ?? `${i + 1}.`} {avatarOf(p.id)} {p.nickname}
                 </span>
                 <span className="font-black">{p.total_score}</span>
               </li>

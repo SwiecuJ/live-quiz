@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -6,7 +6,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { supabase } from "@/lib/supabase/client";
 import { useGameDriver } from "@/lib/useGameDriver";
 import { ANSWER_STYLES } from "@/lib/answerStyles";
-import { avatarFor } from "@/lib/avatar";
+import { avatarsFor } from "@/lib/avatar";
 import { card, gradientText, primaryButton } from "@/lib/theme";
 import type { Player, Room } from "@/lib/types";
 
@@ -284,6 +284,8 @@ function LobbyView({
   starting: boolean;
   onStart: () => void;
 }) {
+  const avatar = avatarsFor(players.map((p) => p.id));
+
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-10">
       <div className="text-center">
@@ -313,7 +315,7 @@ function LobbyView({
                   key={p.id}
                   className="rounded-full border-2 border-black bg-white px-4 py-2 text-sm font-bold text-black shadow-[3px_3px_0_0_#000]"
                 >
-                  {avatarFor(p.id)} {p.nickname}
+                  {avatar(p.id)} {p.nickname}
                 </span>
               ))}
             </div>
@@ -409,6 +411,7 @@ function RoundResultView({
   nextInSeconds: number;
 }) {
   const playerById = new Map(players.map((p) => [p.id, p]));
+  const avatar = avatarsFor(players.map((p) => p.id));
 
   return (
     <div className="flex flex-1 flex-col items-center gap-8 py-6">
@@ -449,7 +452,7 @@ function RoundResultView({
                 className="flex justify-between rounded-xl border border-white/10 bg-white/5 px-3 py-2"
               >
                 <span>
-                  {avatarFor(a.player_id)} {playerById.get(a.player_id)?.nickname ?? "?"}
+                  {avatar(a.player_id)} {playerById.get(a.player_id)?.nickname ?? "?"}
                 </span>
                 <span className={`font-black ${gradientText}`}>+{a.points_awarded}</span>
               </li>
@@ -469,7 +472,7 @@ function RoundResultView({
                 className="flex justify-between rounded-xl border border-white/10 bg-white/5 px-3 py-2"
               >
                 <span>
-                  {i + 1}. {avatarFor(p.id)} {p.nickname}
+                  {i + 1}. {avatar(p.id)} {p.nickname}
                 </span>
                 <span className="font-black">{p.total_score}</span>
               </li>
@@ -503,6 +506,7 @@ function FinalView({
   const podium = players.slice(0, 3);
   const medals = ["🥇", "🥈", "🥉"];
   const playerById = new Map(players.map((p) => [p.id, p]));
+  const avatar = avatarsFor(players.map((p) => p.id));
 
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-10 py-6">
@@ -518,7 +522,7 @@ function FinalView({
               }`}
             >
               <span className="text-center font-black">
-                {avatarFor(p.id)} {p.nickname}
+                {avatar(p.id)} {p.nickname}
               </span>
               <span className="text-sm text-white/60">{p.total_score}</span>
             </div>
@@ -534,7 +538,7 @@ function FinalView({
               className="flex justify-between rounded-xl border border-white/10 bg-white/5 px-3 py-2"
             >
               <span>
-                {i + 1}. {avatarFor(p.id)} {p.nickname}
+                {i + 1}. {avatar(p.id)} {p.nickname}
               </span>
               <span className="font-black">{p.total_score}</span>
             </li>
@@ -567,7 +571,7 @@ function FinalView({
                         className="flex justify-between text-sm text-white/80"
                       >
                         <span>
-                          {i + 1}. {avatarFor(a.player_id)}{" "}
+                          {i + 1}. {avatar(a.player_id)}{" "}
                           {playerById.get(a.player_id)?.nickname ?? "?"}
                         </span>
                         <span className="font-bold">+{a.points_awarded}</span>

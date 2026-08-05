@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import {
   useCallback,
@@ -12,7 +12,7 @@ import {
 import Link from "next/link";
 import { QRCodeSVG } from "qrcode.react";
 import { supabase } from "@/lib/supabase/client";
-import { avatarFor } from "@/lib/avatar";
+import { avatarsFor } from "@/lib/avatar";
 import { card, gradientText, primaryButton, inputBase } from "@/lib/theme";
 import { getDeviceId, getSavedNickname, saveNickname } from "@/lib/identity";
 import { getRfHostMode, setRfHostMode } from "@/lib/ryzykfizyk/hostKey";
@@ -108,6 +108,9 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
     acted: number;
     alive: number;
   } | null>(null);
+
+  // Handed out across the whole table at once, so no two people share a face.
+  const avatar = useMemo(() => avatarsFor(players.map((p) => p.id)), [players]);
 
   const loadedRoleKeyRef = useRef<string | null>(null);
 
@@ -519,7 +522,7 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
                       : "bg-white text-black"
                   }`}
                 >
-                  {p.device_id === BOT_DEVICE_ID ? "🤖" : avatarFor(p.id)} {p.nickname}
+                  {p.device_id === BOT_DEVICE_ID ? "🤖" : avatar(p.id)} {p.nickname}
                 </span>
               ))}
             </div>
@@ -668,7 +671,7 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
                 className="flex items-center justify-between rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm"
               >
                 <span className={p.alive ? "" : "text-white/40 line-through"}>
-                  {avatarFor(p.id)} {p.nickname}
+                  {avatar(p.id)} {p.nickname}
                 </span>
                 <span className="font-black">
                   {p.revealed_role
@@ -683,7 +686,7 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
           </p>
         </div>
         {votesShown?.phase === phaseKey && (
-          <VoteBreakdown players={players} rows={votesShown.rows} />
+          <VoteBreakdown players={players} avatar={avatar} rows={votesShown.rows} />
         )}
         {isHost && (
           <Link href="/mafia" className={primaryButton + " mt-2 text-lg"}>
@@ -773,6 +776,7 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
                 picked is also a night in which nobody's taps stand out. */}
             <ChoiceGrid
               people={alive}
+              avatar={avatar}
               selected={selected}
               meId={creds?.playerId}
               badges={crewBadges}
@@ -836,7 +840,7 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
             </p>
           )}
         </div>
-        <AliveList players={alive} dead={dead} />
+        <AliveList players={alive} dead={dead} avatar={avatar} />
         {nextButton("Głosujemy 🗳️")}
       </div>
     );
@@ -856,12 +860,13 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
             </p>
             {/* Watching is half the fun -- the dead and the screen still get
                 to see the vote build up. */}
-            <ChoiceGrid people={alive} locked badges={voteBadges} onSelect={() => {}} />
+            <ChoiceGrid people={alive} avatar={avatar} locked badges={voteBadges} onSelect={() => {}} />
           </>
         ) : (
           <>
             <ChoiceGrid
               people={alive}
+              avatar={avatar}
               selected={selected}
               meId={creds?.playerId}
               // The vote is final once cast, so the grid greys out rather
@@ -923,9 +928,9 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
         )}
       </div>
       {votesShown?.phase === phaseKey && (
-        <VoteBreakdown players={players} rows={votesShown.rows} />
+        <VoteBreakdown players={players} avatar={avatar} rows={votesShown.rows} />
       )}
-      <AliveList players={alive} dead={dead} />
+      <AliveList players={alive} dead={dead} avatar={avatar} />
       {nextButton("Zapada noc 🌙")}
       {actionError && (
         <p className="text-center text-sm font-semibold text-rose-400">{actionError}</p>
@@ -981,6 +986,7 @@ function PhaseSky({ night }: { night: boolean }) {
  */
 function ChoiceGrid({
   people,
+  avatar,
   selected,
   meId,
   locked = false,
@@ -988,6 +994,7 @@ function ChoiceGrid({
   onSelect,
 }: {
   people: MfPlayer[];
+  avatar: (id: string) => string;
   selected?: string;
   meId?: string;
   locked?: boolean;
@@ -1015,14 +1022,14 @@ function ChoiceGrid({
                 {pointing.length}
               </span>
             )}
-            <span className="block text-xl">{avatarFor(p.id)}</span>
+            <span className="block text-xl">{avatar(p.id)}</span>
             {p.nickname}
             {p.id === meId && <span className="block text-[10px] font-bold opacity-50">to Ty</span>}
             {pointing.length > 0 && (
               <span className="mt-1.5 flex flex-wrap justify-center gap-0.5 text-base leading-none">
                 {pointing.map((voter) => (
                   <span key={voter.id} title={voter.nickname}>
-                    {avatarFor(voter.id)}
+                    {avatar(voter.id)}
                   </span>
                 ))}
               </span>
@@ -1037,9 +1044,11 @@ function ChoiceGrid({
 /** Who backed whom in the lynch vote, once it's over. */
 function VoteBreakdown({
   players,
+  avatar,
   rows,
 }: {
   players: MfPlayer[];
+  avatar: (id: string) => string;
   rows: { player_id: string; target_id: string | null }[];
 }) {
   const byId = new Map(players.map((p) => [p.id, p]));
@@ -1059,7 +1068,7 @@ function VoteBreakdown({
         {sorted.map(([targetId, voters]) => (
           <li key={targetId} className="flex items-start gap-2 text-sm">
             <span className="font-black">
-              {avatarFor(targetId)} {byId.get(targetId)?.nickname ?? "?"}
+              {avatar(targetId)} {byId.get(targetId)?.nickname ?? "?"}
             </span>
             <span className="text-white/25">←</span>
             <span className="text-white/55">{voters.join(", ")}</span>
@@ -1080,7 +1089,15 @@ function Centered({ title, message }: { title: string; message: string }) {
   );
 }
 
-function AliveList({ players, dead }: { players: MfPlayer[]; dead: MfPlayer[] }) {
+function AliveList({
+  players,
+  dead,
+  avatar,
+}: {
+  players: MfPlayer[];
+  dead: MfPlayer[];
+  avatar: (id: string) => string;
+}) {
   return (
     <div className={`p-4 ${card}`}>
       <p className="mb-2 text-sm font-black text-white/70">Żyją ({players.length})</p>
@@ -1090,7 +1107,7 @@ function AliveList({ players, dead }: { players: MfPlayer[]; dead: MfPlayer[] })
             key={p.id}
             className="rounded-full border-2 border-black bg-white px-3 py-1.5 text-sm font-bold text-black shadow-[3px_3px_0_0_#000]"
           >
-            {avatarFor(p.id)} {p.nickname}
+            {avatar(p.id)} {p.nickname}
           </span>
         ))}
       </div>
@@ -1103,7 +1120,7 @@ function AliveList({ players, dead }: { players: MfPlayer[]; dead: MfPlayer[] })
                 key={p.id}
                 className="rounded-full border border-white/10 px-3 py-1.5 text-xs font-bold text-white/40 line-through"
               >
-                {avatarFor(p.id)} {p.nickname}
+                {avatar(p.id)} {p.nickname}
                 {p.revealed_role ? ` ${ROLE_EMOJI[p.revealed_role]}` : ""}
               </span>
             ))}

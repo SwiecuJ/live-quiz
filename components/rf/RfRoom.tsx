@@ -1,10 +1,10 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useRef, useState, useSyncExternalStore, FormEvent } from "react";
 import Link from "next/link";
 import { QRCodeSVG } from "qrcode.react";
 import { supabase } from "@/lib/supabase/client";
-import { avatarFor } from "@/lib/avatar";
+import { avatarsFor } from "@/lib/avatar";
 import { card, gradientText, primaryButton, inputBase } from "@/lib/theme";
 import { getDeviceId, getSavedNickname, saveNickname } from "@/lib/identity";
 import { getRfHostMode, setRfHostMode } from "@/lib/ryzykfizyk/hostKey";
@@ -77,6 +77,8 @@ export default function RfRoom({ roomCode }: { roomCode: string }) {
   const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const me = (myId ? players.find((p) => p.id === myId) : undefined) ?? justJoined;
+  // One face per person, handed out across the whole table at once.
+  const avatar = avatarsFor(players.map((p) => p.id));
 
   // ---- room + realtime ------------------------------------------------
   useEffect(() => {
@@ -395,7 +397,7 @@ export default function RfRoom({ roomCode }: { roomCode: string }) {
     ) : (
       <div className="flex flex-1 flex-col items-center justify-center gap-4 p-6 text-center text-white">
         <h1 className="text-2xl font-black">
-          {avatarFor(me.id)} {me.nickname}!
+          {avatar(me.id)} {me.nickname}!
         </h1>
         <p className="text-white/60">Czekaj na start, zaraz rozdajemy żetony 🎲</p>
         <PlayerChips players={players} />
@@ -432,6 +434,7 @@ export default function RfRoom({ roomCode }: { roomCode: string }) {
         remainingSeconds={remainingSeconds}
         questionText={question?.text ?? ""}
         slots={slots}
+        avatar={avatar}
         myBets={myBets}
         balance={me.balance}
         onPlaceBet={submitBet}
@@ -588,6 +591,7 @@ function BettingPhase({
   remainingSeconds,
   questionText,
   slots,
+  avatar,
   myBets,
   balance,
   onPlaceBet,
@@ -596,6 +600,7 @@ function BettingPhase({
   remainingSeconds: number;
   questionText: string;
   slots: Slot[];
+  avatar: (id: string) => string;
   myBets: RfBet[];
   balance: number;
   onPlaceBet: (slotKey: string, amount: number) => Promise<string | null>;
@@ -653,7 +658,7 @@ function BettingPhase({
                 {slot.value === null ? "Wszyscy przestrzelili" : slot.value.toLocaleString("pl")}
               </span>
               {slot.authorIds.length > 0 && (
-                <span className="text-xs">{slot.authorIds.map((id) => avatarFor(id)).join("")}</span>
+                <span className="text-xs">{slot.authorIds.map((id) => avatar(id)).join("")}</span>
               )}
               <span className="text-sm font-black text-amber-300">{slot.odds}×</span>
               {mine && <span className="text-sm font-black">{mine.amount}$</span>}
@@ -727,6 +732,8 @@ function ScreenHostView({
   starting: boolean;
   onStart: () => void;
 }) {
+  const avatar = avatarsFor(players.map((p) => p.id));
+
   if (room.status === "lobby") {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-6 p-6 text-center text-white">
@@ -805,7 +812,7 @@ function ScreenHostView({
               </span>
               {slot.authorIds.length > 0 && (
                 <span className="text-base">
-                  {slot.authorIds.map((id) => avatarFor(id)).join("")}
+                  {slot.authorIds.map((id) => avatar(id)).join("")}
                 </span>
               )}
               <span className="text-lg font-black text-amber-300">{slot.odds}×</span>
@@ -870,6 +877,7 @@ function PhaseHeader({ left, right, note }: { left: string; right: string; note?
 }
 
 function PlayerChips({ players }: { players: RfPlayer[] }) {
+  const avatar = avatarsFor(players.map((p) => p.id));
   return (
     <div className={`w-full max-w-sm p-4 ${card}`}>
       <p className="mb-3 text-base font-black">Stolik ({players.length})</p>
@@ -882,7 +890,7 @@ function PlayerChips({ players }: { players: RfPlayer[] }) {
               key={p.id}
               className="rounded-full border-2 border-black bg-white px-3 py-1.5 text-sm font-bold text-black shadow-[3px_3px_0_0_#000]"
             >
-              {avatarFor(p.id)} {p.nickname}
+              {avatar(p.id)} {p.nickname}
             </span>
           ))}
         </div>
@@ -892,6 +900,7 @@ function PlayerChips({ players }: { players: RfPlayer[] }) {
 }
 
 function Standings({ players, meId }: { players: RfPlayer[]; meId: string | null }) {
+  const avatar = avatarsFor(players.map((p) => p.id));
   const medals = ["🥇", "🥈", "🥉"];
   return (
     <div className={`w-full max-w-sm p-4 ${card}`}>
@@ -905,7 +914,7 @@ function Standings({ players, meId }: { players: RfPlayer[]; meId: string | null
             }`}
           >
             <span>
-              {medals[i] ?? `${i + 1}.`} {avatarFor(p.id)} {p.nickname}
+              {medals[i] ?? `${i + 1}.`} {avatar(p.id)} {p.nickname}
             </span>
             <span className="font-black">{p.balance}$</span>
           </li>

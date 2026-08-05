@@ -1,11 +1,11 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { card, gradientText, primaryButton, inputBase } from "@/lib/theme";
 import { markAsHost } from "@/lib/hostStorage";
-import { avatarFor } from "@/lib/avatar";
+import { avatarsFor } from "@/lib/avatar";
 
 const ROUND_OPTIONS = [5, 10, 15] as const;
 const MEDALS = ["🥇", "🥈", "🥉"];
@@ -30,6 +30,8 @@ export default function Home() {
   const [joinError, setJoinError] = useState<string | null>(null);
 
   const [leaders, setLeaders] = useState<Leader[]>([]);
+  // Keyed by nickname here -- the all-time table has no player rows behind it.
+  const avatar = avatarsFor(leaders.map((l) => l.nickname));
 
   useEffect(() => {
     let cancelled = false;
@@ -218,7 +220,7 @@ export default function Home() {
                   {MEDALS[i] ?? `${i + 1}.`}
                 </span>
                 <span className="flex-1 truncate font-bold text-white/90">
-                  {avatarFor(l.nickname)} {l.nickname}
+                  {avatar(l.nickname)} {l.nickname}
                 </span>
                 <span className="shrink-0 text-xs text-white/40">
                   {l.games_played} {l.games_played === 1 ? "gra" : "gier"}
