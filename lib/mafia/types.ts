@@ -44,6 +44,11 @@ export interface MfMe {
   allies: string[];
   findings: { nickname: string; isMafia: boolean }[];
   /** Mafia only: what the rest of the crew has picked so far tonight. */
-  allyPicks: { nickname: string; target: string | null }[];
+  allyPicks: {
+    playerId: string;
+    nickname: string;
+    target: string | null;
+    targetId: string | null;
+  }[];
   myPick: string | null;
 }

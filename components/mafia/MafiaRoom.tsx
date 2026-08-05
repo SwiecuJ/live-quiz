@@ -231,27 +231,58 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
   }, [countingPhase, phaseKey, roomCode]);
 
   // ---- who voted for whom ----------------------------------------------
-  // Lynch votes are cast out loud at a real table, so the town gets to see
-  // the tally afterwards -- who backed whom is half the argument for the
-  // next day. Night picks are never published this way.
+  // Lynch votes are cast out loud at a real table, so they're public here
+  // too: live on the tiles while the vote is open, and as a tally once it
+  // closes. That's what the argument the next morning is built on.
+  //
+  // Night picks never travel this way. mf_actions has no read policy and
+  // isn't published over realtime at all -- the only person who learns
+  // anything at night is a mafioso asking about their own crew.
+  const votingPhase = room?.status === "glosowanie";
   const verdictPhase = room?.status === "wynik" || room?.status === "koniec";
   const roomId = room?.id;
   const dayNumber = room?.day_number;
   useEffect(() => {
-    if (!verdictPhase || !roomId || dayNumber === undefined || !phaseKey) return;
+    if ((!votingPhase && !verdictPhase) || !roomId || dayNumber === undefined || !phaseKey) return;
     let cancelled = false;
-    supabase
-      .from("mf_votes")
-      .select("player_id, target_id")
-      .eq("room_id", roomId)
-      .eq("day_number", dayNumber)
-      .then(({ data }) => {
-        if (!cancelled && data) setVotesShown({ phase: phaseKey, rows: data });
+
+    const fetchVotes = () => {
+      supabase
+        .from("mf_votes")
+        .select("player_id, target_id")
+        .eq("room_id", roomId)
+        .eq("day_number", dayNumber)
+        .then(({ data }) => {
+          if (!cancelled && data) setVotesShown({ phase: phaseKey, rows: data });
+        });
+    };
+    fetchVotes();
+
+    // Only while the vote is open: once it's closed the tally can't change,
+    // so there's nothing to listen for.
+    if (!votingPhase) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const channel = supabase
+      .channel(`mafia-votes-${roomId}-${dayNumber}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "mf_votes", filter: `room_id=eq.${roomId}` },
+        fetchVotes
+      )
+      .subscribe((status) => {
+        // Votes cast while the channel was connecting were never delivered.
+        if (status === "SUBSCRIBED") fetchVotes();
       });
+
     return () => {
       cancelled = true;
+      supabase.removeChannel(channel);
     };
-  }, [verdictPhase, roomId, dayNumber, phaseKey]);
+  }, [votingPhase, verdictPhase, roomId, dayNumber, phaseKey]);
 
   /** Just the request. Kept free of state so the auto-advance effect below
    *  doesn't have to touch React state on its way out of a phase. */
@@ -369,6 +400,32 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
   const selected = selectedByPhase[phaseSlot] ?? picked;
   const selectedPlayer = players.find((p) => p.id === selected);
   const needsConfirming = !!selected && selected !== picked;
+
+  const byPlayerId = new Map(players.map((p) => [p.id, p]));
+  const addBadge = (map: Map<string, MfPlayer[]>, targetId: string, who?: MfPlayer) => {
+    if (!who) return;
+    map.set(targetId, [...(map.get(targetId) ?? []), who]);
+  };
+
+  // Day: every vote is public the moment it's cast, so the same chips show
+  // on everyone's screen -- including the dead and whoever is running it.
+  const voteBadges = new Map<string, MfPlayer[]>();
+  if (votesShown?.phase === phaseKey) {
+    for (const row of votesShown.rows) {
+      if (row.target_id) addBadge(voteBadges, row.target_id, byPlayerId.get(row.player_id));
+    }
+  }
+
+  // Night: only ever your own crew, and only if you're in it. The route that
+  // fills allyPicks refuses anyone who isn't mafia, so a citizen's screen has
+  // nothing to draw.
+  const crewBadges = new Map<string, MfPlayer[]>();
+  for (const ally of me?.allyPicks ?? []) {
+    if (ally.targetId) addBadge(crewBadges, ally.targetId, byPlayerId.get(ally.playerId));
+  }
+  // Your own pick belongs up there too: the crew can see it, so you should be
+  // looking at the same board they are.
+  if (me?.role === "mafia" && picked) addBadge(crewBadges, picked, myPlayer);
 
   /** Takes over running the game and moves it on, so a table whose host
    *  device was never marked can't get stranded mid-phase. */
@@ -691,11 +748,16 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
               </div>
             )}
 
+            {/* Who has picked what is on the tiles now; this only has to say
+                who hasn't picked at all yet. */}
             {me?.role === "mafia" && me.allyPicks.length > 0 && (
               <div className="rounded-xl border-2 border-rose-400/40 bg-rose-400/10 px-3 py-2 text-center text-xs font-bold text-rose-200">
-                {me.allyPicks
-                  .map((a) => `${a.nickname}: ${a.target ?? "jeszcze się zastanawia"}`)
-                  .join(" • ")}
+                {me.allyPicks.some((a) => !a.targetId)
+                  ? `Jeszcze się zastanawia: ${me.allyPicks
+                      .filter((a) => !a.targetId)
+                      .map((a) => a.nickname)
+                      .join(", ")}`
+                  : "Cała ekipa już wskazała."}
                 <span className="mt-1 block font-medium text-rose-200/60">
                   Musicie wskazać tę samą osobę — inaczej nikt nie zginie.
                 </span>
@@ -713,6 +775,7 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
               people={alive}
               selected={selected}
               meId={creds?.playerId}
+              badges={crewBadges}
               onSelect={(id) => setSelectedByPhase((prev) => ({ ...prev, [phaseSlot]: id }))}
             />
 
@@ -787,11 +850,14 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
         <p className="text-center text-sm font-black">Kogo wyrzucamy z miasta?</p>
 
         {!iAmPlayer || !amAlive ? (
-          <div className={`p-6 text-center ${card}`}>
-            <p className="text-sm text-white/50">
+          <>
+            <p className="text-center text-sm text-white/50">
               {iAmPlayer ? "Nie żyjesz — tylko patrzysz." : "Prowadzisz — nie głosujesz."}
             </p>
-          </div>
+            {/* Watching is half the fun -- the dead and the screen still get
+                to see the vote build up. */}
+            <ChoiceGrid people={alive} locked badges={voteBadges} onSelect={() => {}} />
+          </>
         ) : (
           <>
             <ChoiceGrid
@@ -801,6 +867,7 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
               // The vote is final once cast, so the grid greys out rather
               // than staying live like it does at night.
               locked={!!picked}
+              badges={voteBadges}
               onSelect={(id) => setSelectedByPhase((prev) => ({ ...prev, [phaseSlot]: id }))}
             />
             {picked ? (
@@ -917,32 +984,52 @@ function ChoiceGrid({
   selected,
   meId,
   locked = false,
+  badges,
   onSelect,
 }: {
   people: MfPlayer[];
   selected?: string;
   meId?: string;
   locked?: boolean;
+  /** Who is pointing at each person right now, keyed by the target's id. */
+  badges?: Map<string, MfPlayer[]>;
   onSelect: (id: string) => void;
 }) {
   return (
     <div className="grid grid-cols-2 gap-2">
-      {people.map((p) => (
-        <button
-          key={p.id}
-          onClick={() => !locked && onSelect(p.id)}
-          disabled={locked}
-          className={`rounded-2xl border-2 px-3 py-4 text-sm font-black transition-transform active:scale-95 ${
-            selected === p.id
-              ? "border-black bg-rose-400 text-black shadow-[4px_4px_0_0_#000]"
-              : "border-white/15 bg-white/5 text-white/80"
-          } ${locked && selected !== p.id ? "opacity-30" : ""}`}
-        >
-          <span className="block text-xl">{avatarFor(p.id)}</span>
-          {p.nickname}
-          {p.id === meId && <span className="block text-[10px] font-bold opacity-50">to Ty</span>}
-        </button>
-      ))}
+      {people.map((p) => {
+        const pointing = badges?.get(p.id) ?? [];
+        return (
+          <button
+            key={p.id}
+            onClick={() => !locked && onSelect(p.id)}
+            disabled={locked}
+            className={`relative rounded-2xl border-2 px-3 py-4 text-sm font-black transition-transform active:scale-95 ${
+              selected === p.id
+                ? "border-black bg-rose-400 text-black shadow-[4px_4px_0_0_#000]"
+                : "border-white/15 bg-white/5 text-white/80"
+            } ${locked && selected && selected !== p.id ? "opacity-40" : ""}`}
+          >
+            {pointing.length > 0 && (
+              <span className="absolute -right-1.5 -top-1.5 flex h-6 min-w-6 items-center justify-center rounded-full border-2 border-black bg-lime-300 px-1 text-xs font-black text-black">
+                {pointing.length}
+              </span>
+            )}
+            <span className="block text-xl">{avatarFor(p.id)}</span>
+            {p.nickname}
+            {p.id === meId && <span className="block text-[10px] font-bold opacity-50">to Ty</span>}
+            {pointing.length > 0 && (
+              <span className="mt-1.5 flex flex-wrap justify-center gap-0.5 text-base leading-none">
+                {pointing.map((voter) => (
+                  <span key={voter.id} title={voter.nickname}>
+                    {avatarFor(voter.id)}
+                  </span>
+                ))}
+              </span>
+            )}
+          </button>
+        );
+      })}
     </div>
   );
 }

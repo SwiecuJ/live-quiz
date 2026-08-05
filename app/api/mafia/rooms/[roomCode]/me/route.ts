@@ -57,7 +57,12 @@ export async function POST(
     role: MafiaRole | null;
     allies: string[];
     findings: { nickname: string; isMafia: boolean }[];
-    allyPicks: { nickname: string; target: string | null }[];
+    allyPicks: {
+      playerId: string;
+      nickname: string;
+      target: string | null;
+      targetId: string | null;
+    }[];
     myPick: string | null;
   } = { role, allies: [], findings: [], allyPicks: [], myPick: null };
 
@@ -109,9 +114,13 @@ export async function POST(
       const nameById = new Map((targets ?? []).map((t) => [t.id, t.nickname]));
       const pickByAlly = new Map((picks ?? []).map((p) => [p.player_id, p.target_id]));
 
+      // Ids as well as names: the crew's picks are drawn onto the tiles, so
+      // the screen has to be able to match them to a player.
       response.allyPicks = (allies ?? []).map((a) => ({
+        playerId: a.id,
         nickname: a.nickname,
         target: pickByAlly.get(a.id) ? (nameById.get(pickByAlly.get(a.id)!) ?? null) : null,
+        targetId: pickByAlly.get(a.id) ?? null,
       }));
     }
   }
