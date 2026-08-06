@@ -64,7 +64,14 @@ export async function POST(
       targetId: string | null;
     }[];
     myPick: string | null;
-  } = { role, allies: [], findings: [], allyPicks: [], myPick: null };
+    nightBoard: {
+      playerId: string;
+      nickname: string;
+      role: MafiaRole | null;
+      targetId: string | null;
+      target: string | null;
+    }[];
+  } = { role, allies: [], findings: [], allyPicks: [], myPick: null, nightBoard: [] };
 
   // What this player has already chosen in the phase that's currently open,
   // so a reload doesn't lose it.
@@ -83,6 +90,46 @@ export async function POST(
       .eq("day_number", room.day_number)
       .maybeSingle();
     response.myPick = ownPick?.target_id ?? null;
+  }
+
+  // The dead watch the whole night: who moved, on whom, and as what. It's
+  // the traditional consolation for being out, and it costs the living
+  // nothing -- but it is the one place where every secret in the game is
+  // handed over at once, so it goes out only to a player this route has
+  // already matched to their secret AND found to be dead. A living player
+  // asking for the same thing gets an empty board.
+  if (room.status === "noc") {
+    const { data: meRow } = await supabase
+      .from("mf_players")
+      .select("alive")
+      .eq("id", playerId)
+      .single();
+
+    if (meRow && !meRow.alive) {
+      const [{ data: actions }, { data: everyone }, { data: allRoles }] = await Promise.all([
+        supabase
+          .from("mf_actions")
+          .select("player_id, target_id")
+          .eq("room_id", room.id)
+          .eq("day_number", room.day_number),
+        supabase.from("mf_players").select("id, nickname").eq("room_id", room.id),
+        supabase.from("mf_secrets").select("player_id, role").eq("room_id", room.id),
+      ]);
+
+      const nameById = new Map((everyone ?? []).map((p) => [p.id, p.nickname]));
+      const roleById = new Map((allRoles ?? []).map((r) => [r.player_id, r.role as MafiaRole]));
+
+      response.nightBoard = (actions ?? [])
+        .map((a) => ({
+          playerId: a.player_id,
+          nickname: nameById.get(a.player_id) ?? "?",
+          role: roleById.get(a.player_id) ?? null,
+          targetId: a.target_id,
+          target: a.target_id ? (nameById.get(a.target_id) ?? null) : null,
+        }))
+        // Mafia first: that's the row a spectator is actually waiting for.
+        .sort((a, b) => Number(b.role === "mafia") - Number(a.role === "mafia"));
+    }
   }
 
   if (role === "mafia") {

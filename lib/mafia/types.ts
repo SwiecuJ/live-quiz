@@ -51,4 +51,12 @@ export interface MfMe {
     targetId: string | null;
   }[];
   myPick: string | null;
+  /** Dead players only: every night move on the table, as it happens. */
+  nightBoard: {
+    playerId: string;
+    nickname: string;
+    role: MafiaRole | null;
+    targetId: string | null;
+    target: string | null;
+  }[];
 }

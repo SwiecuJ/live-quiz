@@ -193,15 +193,18 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
     refreshMe();
   }, [room, creds, refreshMe]);
 
-  // The crew can't talk, so through the night their card is re-read to show
-  // what the others have picked -- that's how they converge on one name.
+  // Two people need the night re-read as it happens: the crew, who can't
+  // talk and converge by watching each other's picks, and the dead, who get
+  // to watch the whole thing. Nobody else learns anything from asking.
   const isNight = room?.status === "noc";
   const amMafia = me?.role === "mafia";
+  const amAlive = !!creds && (players.find((p) => p.id === creds.playerId)?.alive ?? false);
+  const watching = !!creds && !amAlive;
   useEffect(() => {
-    if (!isNight || !amMafia || !creds) return;
+    if (!isNight || !creds || (!amMafia && !watching)) return;
     const interval = setInterval(refreshMe, PROGRESS_POLL_MS);
     return () => clearInterval(interval);
-  }, [isNight, amMafia, creds, refreshMe]);
+  }, [isNight, amMafia, watching, creds, refreshMe]);
 
   // ---- how many have acted ---------------------------------------------
   // Every phase the table waits on people to tap something -- including the
@@ -393,7 +396,6 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
   const dead = players.filter((p) => !p.alive);
   const iAmPlayer = !!creds;
   const myPlayer = creds ? players.find((p) => p.id === creds.playerId) : undefined;
-  const amAlive = myPlayer?.alive ?? false;
   // Falls back to the server's copy so a reload mid-night doesn't look like
   // you never picked.
   const phaseSlot = `${room.status}-${room.day_number}`;
@@ -429,6 +431,14 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
   // Your own pick belongs up there too: the crew can see it, so you should be
   // looking at the same board they are.
   if (me?.role === "mafia" && picked) addBadge(crewBadges, picked, myPlayer);
+
+  // Ghosts get every move, on the same tiles the living are looking at. The
+  // server only fills this in once it has confirmed you're dead, so on a
+  // living player's screen the loop below has nothing to walk.
+  const ghostBadges = new Map<string, MfPlayer[]>();
+  for (const move of me?.nightBoard ?? []) {
+    if (move.targetId) addBadge(ghostBadges, move.targetId, byPlayerId.get(move.playerId));
+  }
 
   /** Takes over running the game and moves it on, so a table whose host
    *  device was never marked can't get stranded mid-phase. */
@@ -706,7 +716,8 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
       <div className="grid w-full grid-cols-3 items-center gap-2 text-sm font-bold text-white/60">
         <span className="text-left">Dzień {room.day_number}</span>
         <span className="text-center text-xs text-white/40">
-          {live ? `${live.acted} / ${live.alive} gotowych` : ""}
+          {/* Nobody left to wait for reads as "1 / 0 gotowych" otherwise. */}
+          {live && live.alive > 0 ? `${live.acted} / ${live.alive} gotowych` : ""}
         </span>
         <span className="text-right">{alive.length} żywych</span>
       </div>
@@ -724,11 +735,31 @@ export default function MafiaRoom({ roomCode }: { roomCode: string }) {
           {me?.role === "mafia" ? `\n\n${mafiaWakesScene(room.day_number)}` : ""}
         </p>
 
-        {!iAmPlayer || !amAlive ? (
+        {!iAmPlayer ? (
+          /* A screen the whole room can see. It gets nothing -- this is the
+             one place where showing the night would end the game. */
           <div className={`p-6 text-center ${card}`}>
-            <p className="font-black">{iAmPlayer ? "Nie żyjesz." : "Prowadzisz miasto."}</p>
+            <p className="font-black">Prowadzisz miasto.</p>
             <p className="mt-1 text-sm text-white/50">Miasto śpi. Ktoś nie doczeka rana…</p>
           </div>
+        ) : !amAlive ? (
+          <>
+            <div className={`p-4 text-center ${card}`}>
+              <p className="text-2xl">👻</p>
+              <p className="font-black">Nie żyjesz — ale widzisz wszystko.</p>
+              <p className="mt-1 text-xs text-white/40">
+                Oglądasz całą noc: kto, kogo i kim jest. Ani słowa do żywych.
+              </p>
+            </div>
+            <ChoiceGrid
+              people={alive}
+              avatar={avatar}
+              locked
+              badges={ghostBadges}
+              onSelect={() => {}}
+            />
+            <GhostBoard rows={me?.nightBoard ?? []} alive={alive} avatar={avatar} />
+          </>
         ) : (
           <>
             {me?.role && (
@@ -1037,6 +1068,51 @@ function ChoiceGrid({
           </button>
         );
       })}
+    </div>
+  );
+}
+
+/**
+ * The night as the dead see it: every move, every role, and who hasn't
+ * moved yet. The living never render this -- the server hands the rows over
+ * only to a player it has confirmed is out of the game.
+ */
+function GhostBoard({
+  rows,
+  alive,
+  avatar,
+}: {
+  rows: MfMe["nightBoard"];
+  alive: MfPlayer[];
+  avatar: (id: string) => string;
+}) {
+  const moved = new Set(rows.map((r) => r.playerId));
+  const pending = alive.filter((p) => !moved.has(p.id));
+
+  return (
+    <div className={`w-full p-4 ${card}`}>
+      <p className="mb-2 text-sm font-black text-white/70">Widok zza grobu 👻</p>
+      {rows.length === 0 ? (
+        <p className="text-sm text-white/40">Jeszcze nikt się nie ruszył.</p>
+      ) : (
+        <ul className="flex flex-col gap-1.5 text-sm">
+          {rows.map((move) => (
+            <li key={move.playerId} className="flex items-center gap-2">
+              <span className="shrink-0">{move.role ? ROLE_EMOJI[move.role] : "❔"}</span>
+              <span className={`font-black ${move.role === "mafia" ? "text-rose-300" : ""}`}>
+                {avatar(move.playerId)} {move.nickname}
+              </span>
+              <span className="text-white/25">→</span>
+              <span className="truncate text-white/60">{move.target ?? "nikogo"}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {pending.length > 0 && (
+        <p className="mt-3 text-xs text-white/30">
+          Jeszcze się zastanawiają: {pending.map((p) => p.nickname).join(", ")}
+        </p>
+      )}
     </div>
   );
 }
